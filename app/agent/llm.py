@@ -22,7 +22,12 @@ class ToolCall:
     type: str = "function"
 
     def arguments_as_json(self) -> JsonDict:
-        return json.loads(self.arguments or "{}")
+        try:
+            return json.loads(self.arguments or "{}")
+        except json.JSONDecodeError as exc:
+            raise LLMProtocolError(
+                f"Tool call {self.id or self.name or '<unknown>'} returned malformed JSON arguments."
+            ) from exc
 
 
 @dataclass(frozen=True)
@@ -225,6 +230,9 @@ def parse_chat_completion(payload: JsonDict) -> LLMResponse:
     ]
     usage_data = payload.get("usage")
     usage = parse_usage(usage_data) if usage_data else None
+
+    for tool_call in tool_calls:
+        tool_call.arguments_as_json()
 
     return LLMResponse(
         model=payload.get("model", ""),

@@ -76,6 +76,38 @@ def test_parse_chat_completion_requires_choices() -> None:
         raise AssertionError("Expected LLMProtocolError when choices are missing.")
 
 
+def test_parse_chat_completion_rejects_malformed_tool_call_json() -> None:
+    try:
+        parse_chat_completion(
+            {
+                "id": "resp_bad_json",
+                "model": "gpt-5.4",
+                "choices": [
+                    {
+                        "finish_reason": "tool_calls",
+                        "message": {
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_bad",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "read_file",
+                                        "arguments": '{"path":',
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+            }
+        )
+    except LLMProtocolError as exc:
+        assert "malformed JSON arguments" in str(exc)
+    else:
+        raise AssertionError("Expected malformed tool call JSON to raise LLMProtocolError.")
+
+
 def test_apply_stream_chunk_accumulates_content_tool_calls_and_usage() -> None:
     from app.agent.llm import _StreamState
 
@@ -144,6 +176,45 @@ def test_apply_stream_chunk_accumulates_content_tool_calls_and_usage() -> None:
     assert response.usage.total_tokens == 28
     assert response.tool_calls[0].name == "list_files"
     assert response.tool_calls[0].arguments == '{"path":"."}'
+
+
+def test_streamed_tool_call_arguments_raise_on_malformed_json() -> None:
+    from app.agent.llm import _StreamState
+
+    state = _StreamState()
+    apply_stream_chunk(
+        state,
+        {
+            "id": "resp_stream_bad",
+            "model": "gpt-5.4",
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_bad",
+                                "type": "function",
+                                "function": {
+                                    "name": "search_text",
+                                    "arguments": '{"query":',
+                                },
+                            }
+                        ]
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
+        },
+    )
+
+    response = state.to_response()
+    try:
+        response.tool_calls[0].arguments_as_json()
+    except LLMProtocolError as exc:
+        assert "malformed JSON arguments" in str(exc)
+    else:
+        raise AssertionError("Expected malformed streamed tool call JSON to raise LLMProtocolError.")
 
 
 def test_client_non_streaming_chat_uses_openai_shape() -> None:
