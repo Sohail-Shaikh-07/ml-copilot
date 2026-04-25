@@ -75,6 +75,78 @@ def test_add_message_and_event_updates_session_history(tmp_path: Path) -> None:
     assert refreshed.updated_at >= session.updated_at
 
 
+def test_update_session_and_load_full_history(tmp_path: Path) -> None:
+    repository = SQLiteRepository(tmp_path / "ml-copilot.db")
+    repository.initialize()
+    repository.create_session(
+        session_id="session-1",
+        title="Initial",
+        model="gpt-5.4",
+        metadata={"source": "test"},
+    )
+    repository.add_message(
+        session_id="session-1",
+        turn_id="turn-1",
+        role="user",
+        content="Hello",
+        sequence=1,
+    )
+    repository.add_event(
+        session_id="session-1",
+        turn_id="turn-1",
+        event_type="processing",
+        data={"status": "started"},
+        sequence=1,
+    )
+
+    updated = repository.update_session(
+        "session-1",
+        title="Updated",
+        status="idle",
+        metadata={"source": "updated"},
+    )
+    history = repository.get_session_history("session-1")
+
+    assert updated.title == "Updated"
+    assert updated.status == "idle"
+    assert updated.metadata_json == '{"source": "updated"}'
+    assert history.session == updated
+    assert len(history.messages) == 1
+    assert len(history.events) == 1
+
+
+def test_list_events_after_and_delete_session(tmp_path: Path) -> None:
+    repository = SQLiteRepository(tmp_path / "ml-copilot.db")
+    repository.initialize()
+    repository.create_session(
+        session_id="session-1",
+        title="Replay",
+        model="gpt-5.4",
+    )
+    repository.add_event(
+        session_id="session-1",
+        turn_id="turn-1",
+        event_type="processing",
+        data={"status": "started"},
+        sequence=1,
+    )
+    second = repository.add_event(
+        session_id="session-1",
+        turn_id="turn-1",
+        event_type="assistant_message",
+        data={"content": "done"},
+        sequence=2,
+    )
+
+    replay_events = repository.list_events_after("session-1", 1)
+    repository.delete_session("session-1")
+
+    assert replay_events == [second]
+    assert repository.get_session("session-1") is None
+    assert repository.list_messages("session-1") == []
+    assert repository.list_events("session-1") == []
+
+
 def repository_path_tables(database_path: Path) -> list[tuple[str]]:
     import sqlite3
 

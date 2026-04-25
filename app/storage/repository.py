@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 
 from app.db import connect_sqlite
-from app.storage.models import EventRecord, MessageRecord, SessionRecord, utc_now
+from app.storage.models import EventRecord, MessageRecord, SessionHistory, SessionRecord, utc_now
 
 
 SCHEMA_STATEMENTS = (
@@ -158,6 +158,50 @@ class SQLiteRepository:
             ).fetchone()
         return _session_from_row(row) if row else None
 
+    def update_session(
+        self,
+        session_id: str,
+        *,
+        title: str | None = None,
+        status: str | None = None,
+        model: str | None = None,
+        metadata: dict | None = None,
+    ) -> SessionRecord:
+        current = self.get_session(session_id)
+        if current is None:
+            raise KeyError(f"Unknown session: {session_id}")
+
+        record = SessionRecord(
+            id=current.id,
+            title=title if title is not None else current.title,
+            status=status if status is not None else current.status,
+            model=model if model is not None else current.model,
+            metadata_json=json.dumps(
+                metadata if metadata is not None else json.loads(current.metadata_json),
+                sort_keys=True,
+            ),
+            created_at=current.created_at,
+            updated_at=utc_now(),
+        )
+        with connect_sqlite(self.database_path) as connection:
+            connection.execute(
+                """
+                UPDATE sessions
+                SET title = ?, status = ?, model = ?, metadata_json = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    record.title,
+                    record.status,
+                    record.model,
+                    record.metadata_json,
+                    record.updated_at,
+                    record.id,
+                ),
+            )
+            connection.commit()
+        return record
+
     def list_sessions(self) -> list[SessionRecord]:
         with connect_sqlite(self.database_path) as connection:
             rows = connection.execute(
@@ -283,6 +327,40 @@ class SQLiteRepository:
                 (session_id,),
             ).fetchall()
         return [_event_from_row(row) for row in rows]
+
+    def list_events_after(self, session_id: str, sequence: int) -> list[EventRecord]:
+        with connect_sqlite(self.database_path) as connection:
+            rows = connection.execute(
+                """
+                SELECT id, session_id, turn_id, event_type, data_json, sequence, created_at
+                FROM events
+                WHERE session_id = ? AND sequence > ?
+                ORDER BY sequence ASC, created_at ASC
+                """,
+                (session_id, sequence),
+            ).fetchall()
+        return [_event_from_row(row) for row in rows]
+
+    def get_session_history(self, session_id: str) -> SessionHistory:
+        session = self.get_session(session_id)
+        if session is None:
+            raise KeyError(f"Unknown session: {session_id}")
+        return SessionHistory(
+            session=session,
+            messages=self.list_messages(session_id),
+            events=self.list_events(session_id),
+        )
+
+    def delete_session(self, session_id: str) -> None:
+        with connect_sqlite(self.database_path) as connection:
+            connection.execute(
+                """
+                DELETE FROM sessions
+                WHERE id = ?
+                """,
+                (session_id,),
+            )
+            connection.commit()
 
     def _touch_session(self, connection: sqlite3.Connection, session_id: str) -> None:
         connection.execute(
