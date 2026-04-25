@@ -44,3 +44,10 @@ class EventRecord:
     data_json: str
     sequence: int
     created_at: str
+
+
+@dataclass(frozen=True)
+class SessionHistory:
+    session: SessionRecord
+    messages: list[MessageRecord]
+    events: list[EventRecord]
