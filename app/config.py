@@ -1,13 +1,11 @@
-"""Bootstrap configuration primitives.
-
-This module intentionally stays light for ML-2. Environment loading and richer
-runtime settings belong to the dedicated configuration task later in Phase 1.
-"""
+"""Application configuration and environment loading."""
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Mapping
 
 
 @dataclass(frozen=True)
@@ -21,6 +19,11 @@ class AppPaths:
     @classmethod
     def default(cls) -> "AppPaths":
         workspace_root = Path(__file__).resolve().parent.parent
+        return cls.from_workspace_root(workspace_root)
+
+    @classmethod
+    def from_workspace_root(cls, workspace_root: Path) -> "AppPaths":
+        workspace_root = workspace_root.resolve()
         return cls(
             workspace_root=workspace_root,
             app_dir=workspace_root / "app",
@@ -31,10 +34,28 @@ class AppPaths:
 
 
 @dataclass(frozen=True)
+class LLMSettings:
+    base_url: str
+    api_key: str | None
+    model: str
+    timeout_seconds: int
+
+
+@dataclass(frozen=True)
+class SafetySettings:
+    require_tool_approval: bool
+    allow_destructive_commands: bool
+    redact_secrets: bool
+
+
+@dataclass(frozen=True)
 class AppSettings:
     app_name: str
     version: str
     paths: AppPaths
+    llm: LLMSettings
+    db_path: Path
+    safety: SafetySettings
 
     @classmethod
     def from_paths(cls, paths: AppPaths) -> "AppSettings":
@@ -42,4 +63,145 @@ class AppSettings:
             app_name="ML Copilot",
             version="0.1.0",
             paths=paths,
+            llm=LLMSettings(
+                base_url="https://api.openai.com/v1",
+                api_key=None,
+                model="gpt-5.4",
+                timeout_seconds=600,
+            ),
+            db_path=paths.workspace_root / ".ml-copilot" / "ml-copilot.db",
+            safety=SafetySettings(
+                require_tool_approval=True,
+                allow_destructive_commands=False,
+                redact_secrets=True,
+            ),
         )
+
+    @classmethod
+    def load(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        env_file: Path | None = None,
+    ) -> "AppSettings":
+        merged_env = load_environment(environ=environ, env_file=env_file)
+        workspace_root = Path(
+            merged_env.get("ML_COPILOT_WORKSPACE_ROOT", str(AppPaths.default().workspace_root))
+        )
+        paths = AppPaths.from_workspace_root(workspace_root)
+
+        db_path = Path(
+            merged_env.get(
+                "ML_COPILOT_DB_PATH",
+                str(paths.workspace_root / ".ml-copilot" / "ml-copilot.db"),
+            )
+        )
+        if not db_path.is_absolute():
+            db_path = paths.workspace_root / db_path
+
+        return cls(
+            app_name="ML Copilot",
+            version="0.1.0",
+            paths=paths,
+            llm=LLMSettings(
+                base_url=merged_env.get("LLM_BASE_URL", "https://api.openai.com/v1"),
+                api_key=blank_to_none(merged_env.get("LLM_API_KEY")),
+                model=merged_env.get("LLM_MODEL", "gpt-5.4"),
+                timeout_seconds=parse_int(
+                    "LLM_TIMEOUT_SECONDS",
+                    merged_env.get("LLM_TIMEOUT_SECONDS"),
+                    default=600,
+                    minimum=1,
+                ),
+            ),
+            db_path=db_path.resolve(),
+            safety=SafetySettings(
+                require_tool_approval=parse_bool(
+                    "ML_COPILOT_REQUIRE_TOOL_APPROVAL",
+                    merged_env.get("ML_COPILOT_REQUIRE_TOOL_APPROVAL"),
+                    default=True,
+                ),
+                allow_destructive_commands=parse_bool(
+                    "ML_COPILOT_ALLOW_DESTRUCTIVE_COMMANDS",
+                    merged_env.get("ML_COPILOT_ALLOW_DESTRUCTIVE_COMMANDS"),
+                    default=False,
+                ),
+                redact_secrets=parse_bool(
+                    "ML_COPILOT_REDACT_SECRETS",
+                    merged_env.get("ML_COPILOT_REDACT_SECRETS"),
+                    default=True,
+                ),
+            ),
+        )
+
+
+def blank_to_none(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def parse_bool(name: str, value: str | None, *, default: bool) -> bool:
+    if value is None:
+        return default
+
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean value, got {value!r}.")
+
+
+def parse_int(name: str, value: str | None, *, default: int, minimum: int | None = None) -> int:
+    if value is None:
+        return default
+
+    parsed = int(value)
+    if minimum is not None and parsed < minimum:
+        raise ValueError(f"{name} must be >= {minimum}, got {parsed}.")
+    return parsed
+
+
+def load_environment(
+    environ: Mapping[str, str] | None = None,
+    env_file: Path | None = None,
+) -> dict[str, str]:
+    environment = dict(os.environ if environ is None else environ)
+    resolved_env_file = _resolve_env_file(environment, env_file=env_file)
+    file_values = read_env_file(resolved_env_file)
+    return {**file_values, **environment}
+
+
+def _resolve_env_file(environment: Mapping[str, str], env_file: Path | None) -> Path:
+    if env_file is not None:
+        return env_file
+
+    configured = environment.get("ML_COPILOT_ENV_FILE")
+    if configured:
+        return Path(configured)
+
+    return AppPaths.default().workspace_root / ".env"
+
+
+def read_env_file(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            raise ValueError(f"Invalid env line in {path}: {raw_line!r}")
+
+        key, raw_value = line.split("=", 1)
+        values[key.strip()] = strip_optional_quotes(raw_value.strip())
+    return values
+
+
+def strip_optional_quotes(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        return value[1:-1]
+    return value
