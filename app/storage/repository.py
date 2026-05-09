@@ -10,7 +10,6 @@ from pathlib import Path
 from app.db import connect_sqlite
 from app.storage.models import EventRecord, MessageRecord, SessionHistory, SessionRecord, utc_now
 
-
 SCHEMA_STATEMENTS = (
     """
     CREATE TABLE IF NOT EXISTS sessions (

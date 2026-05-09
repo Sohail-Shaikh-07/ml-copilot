@@ -10,7 +10,6 @@ import httpx
 
 from app.config import AppSettings
 
-
 JsonDict = dict[str, Any]
 
 
@@ -26,7 +25,8 @@ class ToolCall:
             return json.loads(self.arguments or "{}")
         except json.JSONDecodeError as exc:
             raise LLMProtocolError(
-                f"Tool call {self.id or self.name or '<unknown>'} returned malformed JSON arguments."
+                f"Tool call {self.id or self.name or '<unknown>'}"
+                " returned malformed JSON arguments."
             ) from exc
 
 
