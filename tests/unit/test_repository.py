@@ -144,6 +144,90 @@ def test_list_events_after_and_delete_session(tmp_path: Path) -> None:
     assert repository.list_events("session-1") == []
 
 
+def test_tool_call_and_approval_lifecycle(tmp_path: Path) -> None:
+    repository = SQLiteRepository(tmp_path / "ml-copilot.db")
+    repository.initialize()
+    repository.create_session(
+        session_id="session-1",
+        title="Approvals",
+        model="gpt-5.4",
+    )
+
+    tool_call = repository.add_tool_call(
+        session_id="session-1",
+        turn_id="turn-1",
+        tool_name="run_command",
+        arguments={"command": "pytest"},
+        status="pending_approval",
+        requires_approval=True,
+        tool_call_id="call-1",
+    )
+    approval = repository.create_approval(
+        session_id="session-1",
+        turn_id="turn-1",
+        tool_call_id=tool_call.id,
+        approval_id="approval-1",
+    )
+    repository.update_tool_call(tool_call.id, approval_id=approval.id)
+
+    pending = repository.list_pending_approvals("session-1")
+    resolved_approval = repository.update_approval(
+        approval.id,
+        status="approved",
+        responded_at="2026-05-09T00:00:00+00:00",
+        user_feedback="looks good",
+        edited_payload={"command": "pytest -q"},
+    )
+    resolved_tool_call = repository.update_tool_call(
+        tool_call.id,
+        status="completed",
+        arguments={"command": "pytest -q"},
+        finished_at="2026-05-09T00:00:01+00:00",
+        output="ok",
+        success=True,
+    )
+
+    assert len(pending) == 1
+    assert pending[0].approval.id == "approval-1"
+    assert pending[0].tool_call.id == "call-1"
+    assert resolved_approval.status == "approved"
+    assert resolved_approval.edited_payload_json == '{"command": "pytest -q"}'
+    assert resolved_tool_call.status == "completed"
+    assert resolved_tool_call.output == "ok"
+    assert repository.list_pending_approvals("session-1") == []
+
+
+def test_next_sequences_advance_with_history(tmp_path: Path) -> None:
+    repository = SQLiteRepository(tmp_path / "ml-copilot.db")
+    repository.initialize()
+    repository.create_session(
+        session_id="session-1",
+        title="Sequence",
+        model="gpt-5.4",
+    )
+
+    assert repository.next_message_sequence("session-1") == 0
+    assert repository.next_event_sequence("session-1") == 0
+
+    repository.add_message(
+        session_id="session-1",
+        turn_id="turn-1",
+        role="user",
+        content="hello",
+        sequence=0,
+    )
+    repository.add_event(
+        session_id="session-1",
+        turn_id="turn-1",
+        event_type="processing",
+        data={},
+        sequence=0,
+    )
+
+    assert repository.next_message_sequence("session-1") == 1
+    assert repository.next_event_sequence("session-1") == 1
+
+
 def repository_path_tables(database_path: Path) -> list[tuple[str]]:
     import sqlite3
 

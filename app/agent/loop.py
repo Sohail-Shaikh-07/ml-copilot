@@ -2,21 +2,21 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable
 
-from app.agent.llm import LLMClient, ToolCall
+from app.agent.llm import LLMClient
 from app.config import AppSettings
-from app.storage.models import SessionRecord
+from app.storage.models import MessageRecord, PendingApprovalRecord, SessionRecord
 from app.storage.repository import SQLiteRepository
 from app.tools.registry import ToolRegistry, ToolSpec
 
 logger = logging.getLogger(__name__)
 
 
-# Event types for SSE streaming
 class EventType:
     READY = "ready"
     PROCESSING = "processing"
@@ -25,15 +25,13 @@ class EventType:
     TOOL_CALL = "tool_call"
     TOOL_OUTPUT = "tool_output"
     APPROVAL_REQUIRED = "approval_required"
+    APPROVAL_RESOLVED = "approval_resolved"
     TURN_COMPLETE = "turn_complete"
     ERROR = "error"
     INTERRUPTED = "interrupted"
 
 
-# Maximum iterations per turn to prevent infinite loops
 MAX_ITERATIONS = 50
-
-# Tools that require approval before execution
 APPROVAL_REQUIRED_TOOLS = {"apply_patch", "run_command", "write_file"}
 
 
@@ -75,22 +73,9 @@ class TurnContext:
 
     session_id: str
     turn_id: str
-    user_message: str
-    messages: list[dict[str, Any]] = field(default_factory=list)
-    tool_calls: list[ToolCall] = field(default_factory=list)
-    event_sequence: int = 0
-
-
-@dataclass
-class ToolExecutionResult:
-    """Result of a tool execution."""
-
-    tool_name: str
-    tool_call_id: str
-    success: bool
-    output: str
-    requires_approval: bool = False
-    error: str | None = None
+    messages: list[dict[str, Any]]
+    event_sequence: int
+    message_sequence: int
 
 
 class AgentLoop:
@@ -107,15 +92,11 @@ class AgentLoop:
         self.tools = tool_registry
         self.repo = repository
         self.settings = settings
-
-        # Event handlers (for SSE streaming)
         self._event_handlers: list[Callable[[AgentEvent], None]] = []
-
-        # Interrupt flag
         self._interrupted = False
 
     def add_event_handler(self, handler: Callable[[AgentEvent], None]) -> None:
-        """Add a handler for agent events (e.g., SSE streaming)."""
+        """Add a handler for agent events (e.g. SSE streaming)."""
         self._event_handlers.append(handler)
 
     def remove_event_handler(self, handler: Callable[[AgentEvent], None]) -> None:
@@ -139,7 +120,6 @@ class AgentLoop:
         )
         turn_context.event_sequence += 1
 
-        # Persist event
         self.repo.add_event(
             session_id=event.session_id,
             turn_id=event.turn_id,
@@ -149,12 +129,11 @@ class AgentLoop:
             event_id=event.id,
         )
 
-        # Notify handlers
         for handler in self._event_handlers:
             try:
                 handler(event)
-            except Exception as e:
-                logger.warning(f"Event handler error: {e}")
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.warning("Event handler error: %s", exc)
 
     async def run_turn(
         self,
@@ -162,51 +141,91 @@ class AgentLoop:
         user_message: str,
         system_prompt: str | None = None,
     ) -> dict[str, Any]:
-        """Run a complete agent turn with user message and tool execution."""
-        turn_id = str(uuid.uuid4())
-
-        # Create turn context
-        ctx = TurnContext(
-            session_id=session.id,
-            turn_id=turn_id,
-            user_message=user_message,
-            messages=_build_messages(
-                user_message=user_message,
-                system_prompt=system_prompt or _default_system_prompt(),
-            ),
-        )
-
-        # Emit ready event
+        """Run a complete turn for a new user message."""
+        ctx = self._build_turn_context(session, system_prompt)
         await self.emit_event(ctx, EventType.READY, {"message": "Agent ready"})
 
-        # Store user message
-        self.repo.add_message(
-            session_id=ctx.session_id,
-            turn_id=ctx.turn_id,
+        pending_approvals = self.repo.list_pending_approvals(session.id)
+        if pending_approvals:
+            await self._abandon_pending_approvals(ctx, pending_approvals)
+
+        self._append_message(
+            ctx,
             role="user",
             content=user_message,
-            sequence=0,
         )
-        ctx.messages.append({"role": "user", "content": user_message})
+        await self.emit_event(ctx, EventType.PROCESSING, {})
+        return await self._run_loop(session, ctx)
 
-        # Emit processing event
+    async def resume_pending_approval(
+        self,
+        session: SessionRecord,
+        approval_id: str,
+        *,
+        approved: bool,
+        user_feedback: str | None = None,
+        edited_arguments: dict[str, Any] | None = None,
+        system_prompt: str | None = None,
+    ) -> dict[str, Any]:
+        """Apply an approval decision and continue the agent loop."""
+        ctx = self._build_turn_context(session, system_prompt)
+        await self.emit_event(ctx, EventType.READY, {"message": "Approval decision received"})
         await self.emit_event(ctx, EventType.PROCESSING, {})
 
-        # Get tool specs for LLM
-        tool_specs = self.tools.openai_tools()
+        pending_approval = self._get_pending_approval(session.id, approval_id)
+        if approved:
+            await self._approve_pending_tool(
+                ctx,
+                pending_approval,
+                user_feedback=user_feedback,
+                edited_arguments=edited_arguments,
+            )
+        else:
+            await self._reject_pending_tool(
+                ctx,
+                pending_approval,
+                status="rejected",
+                message=_approval_rejection_message(user_feedback),
+                user_feedback=user_feedback,
+                edited_arguments=edited_arguments,
+            )
 
-        # Track iterations
+        return await self._run_loop(session, ctx)
+
+    def interrupt(self) -> None:
+        """Signal the agent to stop after the current operation."""
+        self._interrupted = True
+
+    def _build_turn_context(
+        self,
+        session: SessionRecord,
+        system_prompt: str | None,
+    ) -> TurnContext:
+        prompt = system_prompt or _default_system_prompt()
+        history = [_message_to_llm_dict(record) for record in self.repo.list_messages(session.id)]
+        return TurnContext(
+            session_id=session.id,
+            turn_id=str(uuid.uuid4()),
+            messages=[{"role": "system", "content": prompt}, *history],
+            event_sequence=self.repo.next_event_sequence(session.id),
+            message_sequence=self.repo.next_message_sequence(session.id),
+        )
+
+    async def _run_loop(
+        self,
+        session: SessionRecord,
+        ctx: TurnContext,
+    ) -> dict[str, Any]:
+        tool_specs = self.tools.openai_tools()
         iterations = 0
-        tool_results: list[dict[str, Any]] = []
 
         while iterations < MAX_ITERATIONS:
             if self._interrupted:
                 await self.emit_event(ctx, EventType.INTERRUPTED, {})
-                break
+                return {"status": "interrupted", "iterations": iterations}
 
             iterations += 1
 
-            # Call LLM
             try:
                 response = await self.llm.chat(
                     messages=ctx.messages,
@@ -214,15 +233,13 @@ class AgentLoop:
                     tool_choice="auto" if tool_specs else None,
                     stream=True,
                 )
-            except Exception as e:
-                await self.emit_event(ctx, EventType.ERROR, {"error": str(e)})
+            except Exception as exc:
+                await self.emit_event(ctx, EventType.ERROR, {"error": str(exc)})
                 raise
 
-            # Process response
             full_content = response.content
             tool_calls = response.tool_calls
 
-            # Emit assistant chunk (for streaming display)
             if full_content:
                 await self.emit_event(
                     ctx,
@@ -230,124 +247,368 @@ class AgentLoop:
                     {"content": full_content, "finish_reason": response.finish_reason},
                 )
 
-            # Store assistant message
-            assistant_content = full_content or ""
+            assistant_content = "" if tool_calls else (full_content or "")
+            assistant_raw = (
+                {
+                    "tool_calls": [
+                        {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
+                        for tc in tool_calls
+                    ]
+                }
+                if tool_calls
+                else None
+            )
+            assistant_message: dict[str, Any] = {
+                "role": "assistant",
+                "content": assistant_content,
+            }
             if tool_calls:
-                assistant_content = ""  # Tool calls are in raw_json
-
-            self.repo.add_message(
-                session_id=ctx.session_id,
-                turn_id=ctx.turn_id,
+                assistant_message["tool_calls"] = [
+                    {
+                        "id": tc.id,
+                        "type": tc.type,
+                        "function": {"name": tc.name, "arguments": tc.arguments},
+                    }
+                    for tc in tool_calls
+                ]
+            self._append_message(
+                ctx,
                 role="assistant",
                 content=assistant_content,
-                sequence=len(ctx.messages),
-                raw=(
-                    {"tool_calls": [{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in tool_calls]}
-                    if tool_calls
-                    else None
-                ),
-            )
-            ctx.messages.append(
-                {
-                    "role": "assistant",
-                    "content": assistant_content,
-                    **(
-                        {
-                            "tool_calls": [
-                                {"id": tc.id, "type": tc.type, "function": {"name": tc.name, "arguments": tc.arguments}}
-                                for tc in tool_calls
-                            ]
-                        }
-                        if tool_calls
-                        else {}
-                    ),
-                }
+                raw=assistant_raw,
+                llm_message=assistant_message,
             )
 
-            # If no tool calls, we're done
             if not tool_calls:
                 await self.emit_event(ctx, EventType.ASSISTANT_MESSAGE, {"content": full_content or ""})
                 await self.emit_event(ctx, EventType.TURN_COMPLETE, {"iterations": iterations})
                 return {"status": "complete", "content": full_content, "iterations": iterations}
 
-            # Process tool calls
-            for tc in tool_calls:
+            pending_payloads: list[dict[str, Any]] = []
+            approval_ids: list[str] = []
+
+            for tool_call in tool_calls:
                 await self.emit_event(
                     ctx,
                     EventType.TOOL_CALL,
                     {
-                        "id": tc.id,
-                        "name": tc.name,
-                        "arguments": tc.arguments,
+                        "id": tool_call.id,
+                        "name": tool_call.name,
+                        "arguments": tool_call.arguments,
                     },
                 )
 
-                # Check if approval is required
-                requires_approval = tc.name in APPROVAL_REQUIRED_TOOLS
-
-                if requires_approval and self.settings.safety.require_tool_approval:
-                    # Emit approval required event and wait
-                    await self.emit_event(
-                        ctx,
-                        EventType.APPROVAL_REQUIRED,
-                        {
-                            "tool_call_id": tc.id,
-                            "tool_name": tc.name,
-                            "arguments": tc.arguments,
-                        },
+                try:
+                    arguments = tool_call.arguments_as_json()
+                except Exception as exc:
+                    error_message = f"Tool execution error: {exc}"
+                    self.repo.add_tool_call(
+                        session_id=ctx.session_id,
+                        turn_id=ctx.turn_id,
+                        tool_name=tool_call.name,
+                        arguments={},
+                        status="failed",
+                        requires_approval=False,
+                        started_at=_utc_now(),
+                        finished_at=_utc_now(),
+                        output=error_message,
+                        success=False,
+                        error=error_message,
+                        tool_call_id=tool_call.id,
                     )
-                    # For now, auto-reject if approval not granted
-                    # In full implementation, this would wait for user approval
-                    tool_result = {
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": ("Approval required. Tool execution skipped pending user approval."),
-                    }
-                    tool_results.append(tool_result)
-                    ctx.messages.append(tool_result)
+                    await self._record_tool_output(
+                        ctx,
+                        tool_call_id=tool_call.id,
+                        tool_name=tool_call.name,
+                        output=error_message,
+                        success=False,
+                    )
                     continue
 
-                # Execute tool
-                try:
-                    args = tc.arguments_as_json()
-                    tool_output = await self.tools.call(tc.name, args)
-                except Exception as e:
-                    tool_output = f"Tool execution error: {e}"
+                requires_approval = (
+                    self.settings.safety.require_tool_approval
+                    and tool_call.name in APPROVAL_REQUIRED_TOOLS
+                )
+                if requires_approval:
+                    self.repo.add_tool_call(
+                        session_id=ctx.session_id,
+                        turn_id=ctx.turn_id,
+                        tool_name=tool_call.name,
+                        arguments=arguments,
+                        status="pending_approval",
+                        requires_approval=True,
+                        started_at=_utc_now(),
+                        tool_call_id=tool_call.id,
+                    )
+                    approval = self.repo.create_approval(
+                        session_id=ctx.session_id,
+                        turn_id=ctx.turn_id,
+                        tool_call_id=tool_call.id,
+                    )
+                    self.repo.update_tool_call(tool_call.id, approval_id=approval.id)
+                    approval_ids.append(approval.id)
+                    pending_payloads.append(
+                        {
+                            "approval_id": approval.id,
+                            "tool_call_id": tool_call.id,
+                            "tool_name": tool_call.name,
+                            "arguments": arguments,
+                        }
+                    )
+                    continue
 
-                # Store tool result
-                tool_result = {
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": tool_output,
-                }
-                tool_results.append(tool_result)
-                ctx.messages.append(tool_result)
-
-                await self.emit_event(
+                await self._execute_tool_call(
                     ctx,
-                    EventType.TOOL_OUTPUT,
-                    {
-                        "tool_call_id": tc.id,
-                        "tool_name": tc.name,
-                        "output": tool_output,
-                        "success": "error" not in tool_output.lower(),
-                    },
+                    tool_call_id=tool_call.id,
+                    tool_name=tool_call.name,
+                    arguments=arguments,
                 )
 
-        # Max iterations reached
+            if pending_payloads:
+                await self.emit_event(
+                    ctx,
+                    EventType.APPROVAL_REQUIRED,
+                    {"tools": pending_payloads, "count": len(pending_payloads)},
+                )
+                return {
+                    "status": "approval_required",
+                    "iterations": iterations,
+                    "pending_approvals": pending_payloads,
+                    "approval_ids": approval_ids,
+                }
+
         await self.emit_event(ctx, EventType.TURN_COMPLETE, {"iterations": iterations, "max_reached": True})
         return {"status": "max_iterations", "iterations": iterations}
 
-    def interrupt(self) -> None:
-        """Signal the agent to stop after current operation."""
-        self._interrupted = True
+    async def _execute_tool_call(
+        self,
+        ctx: TurnContext,
+        *,
+        tool_call_id: str,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> None:
+        now = _utc_now()
+        existing = self.repo.get_tool_call(tool_call_id)
+        if existing is None:
+            self.repo.add_tool_call(
+                session_id=ctx.session_id,
+                turn_id=ctx.turn_id,
+                tool_name=tool_name,
+                arguments=arguments,
+                status="running",
+                requires_approval=False,
+                started_at=now,
+                tool_call_id=tool_call_id,
+            )
+        else:
+            self.repo.update_tool_call(
+                tool_call_id,
+                status="running",
+                arguments=arguments,
+                started_at=existing.started_at or now,
+                error=None,
+            )
 
+        try:
+            tool_output = await self.tools.call(tool_name, arguments)
+            success = True
+            error = None
+        except Exception as exc:
+            tool_output = f"Tool execution error: {exc}"
+            success = False
+            error = str(exc)
 
-# ── Helper Functions ─────────────────────────────────────────────────────────────
+        self.repo.update_tool_call(
+            tool_call_id,
+            status="completed" if success else "failed",
+            arguments=arguments,
+            finished_at=_utc_now(),
+            output=tool_output,
+            success=success,
+            error=error,
+        )
+        await self._record_tool_output(
+            ctx,
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            output=tool_output,
+            success=success,
+        )
+
+    async def _record_tool_output(
+        self,
+        ctx: TurnContext,
+        *,
+        tool_call_id: str,
+        tool_name: str,
+        output: str,
+        success: bool,
+    ) -> None:
+        tool_message = {
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "content": output,
+            "name": tool_name,
+        }
+        self._append_message(
+            ctx,
+            role="tool",
+            content=output,
+            tool_call_id=tool_call_id,
+            name=tool_name,
+            llm_message=tool_message,
+        )
+        await self.emit_event(
+            ctx,
+            EventType.TOOL_OUTPUT,
+            {
+                "tool_call_id": tool_call_id,
+                "tool_name": tool_name,
+                "output": output,
+                "success": success,
+            },
+        )
+
+    async def _abandon_pending_approvals(
+        self,
+        ctx: TurnContext,
+        pending_approvals: list[PendingApprovalRecord],
+    ) -> None:
+        for pending_approval in pending_approvals:
+            await self._reject_pending_tool(
+                ctx,
+                pending_approval,
+                status="abandoned",
+                message="Tool execution abandoned because the user continued the conversation.",
+                user_feedback=None,
+                edited_arguments=None,
+            )
+
+    async def _approve_pending_tool(
+        self,
+        ctx: TurnContext,
+        pending_approval: PendingApprovalRecord,
+        *,
+        user_feedback: str | None,
+        edited_arguments: dict[str, Any] | None,
+    ) -> None:
+        original_arguments = json.loads(pending_approval.tool_call.arguments_json)
+        arguments = edited_arguments if edited_arguments is not None else original_arguments
+        self.repo.update_approval(
+            pending_approval.approval.id,
+            status="approved",
+            responded_at=_utc_now(),
+            user_feedback=user_feedback,
+            edited_payload=edited_arguments,
+        )
+        self.repo.update_tool_call(
+            pending_approval.tool_call.id,
+            status="approved",
+            arguments=arguments,
+        )
+        await self.emit_event(
+            ctx,
+            EventType.APPROVAL_RESOLVED,
+            {
+                "approval_id": pending_approval.approval.id,
+                "tool_call_id": pending_approval.tool_call.id,
+                "tool_name": pending_approval.tool_call.tool_name,
+                "decision": "approved",
+            },
+        )
+        await self._execute_tool_call(
+            ctx,
+            tool_call_id=pending_approval.tool_call.id,
+            tool_name=pending_approval.tool_call.tool_name,
+            arguments=arguments,
+        )
+
+    async def _reject_pending_tool(
+        self,
+        ctx: TurnContext,
+        pending_approval: PendingApprovalRecord,
+        *,
+        status: str,
+        message: str,
+        user_feedback: str | None,
+        edited_arguments: dict[str, Any] | None,
+    ) -> None:
+        self.repo.update_approval(
+            pending_approval.approval.id,
+            status=status,
+            responded_at=_utc_now(),
+            user_feedback=user_feedback,
+            edited_payload=edited_arguments,
+        )
+        self.repo.update_tool_call(
+            pending_approval.tool_call.id,
+            status=status,
+            finished_at=_utc_now(),
+            output=message,
+            success=False,
+            error=message,
+        )
+        await self.emit_event(
+            ctx,
+            EventType.APPROVAL_RESOLVED,
+            {
+                "approval_id": pending_approval.approval.id,
+                "tool_call_id": pending_approval.tool_call.id,
+                "tool_name": pending_approval.tool_call.tool_name,
+                "decision": status,
+            },
+        )
+        await self._record_tool_output(
+            ctx,
+            tool_call_id=pending_approval.tool_call.id,
+            tool_name=pending_approval.tool_call.tool_name,
+            output=message,
+            success=False,
+        )
+
+    def _append_message(
+        self,
+        ctx: TurnContext,
+        *,
+        role: str,
+        content: str,
+        tool_call_id: str | None = None,
+        name: str | None = None,
+        raw: dict[str, Any] | None = None,
+        llm_message: dict[str, Any] | None = None,
+    ) -> None:
+        self.repo.add_message(
+            session_id=ctx.session_id,
+            turn_id=ctx.turn_id,
+            role=role,
+            content=content,
+            sequence=ctx.message_sequence,
+            tool_call_id=tool_call_id,
+            name=name,
+            raw=raw,
+        )
+        ctx.message_sequence += 1
+        ctx.messages.append(
+            llm_message
+            if llm_message is not None
+            else _message_payload(
+                role=role,
+                content=content,
+                tool_call_id=tool_call_id,
+                name=name,
+            )
+        )
+
+    def _get_pending_approval(self, session_id: str, approval_id: str) -> PendingApprovalRecord:
+        for pending_approval in self.repo.list_pending_approvals(session_id):
+            if pending_approval.approval.id == approval_id:
+                return pending_approval
+        raise KeyError(f"Unknown pending approval: {approval_id}")
 
 
 def _utc_now() -> str:
-    """Return current UTC time as ISO string."""
+    """Return current UTC time as an ISO string."""
     from datetime import UTC, datetime
 
     return datetime.now(UTC).isoformat()
@@ -388,12 +649,48 @@ Safety:
 """
 
 
-def _build_messages(user_message: str, system_prompt: str) -> list[dict[str, Any]]:
-    """Build the message list for LLM completion."""
-    return [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_message},
-    ]
+def _message_to_llm_dict(record: MessageRecord) -> dict[str, Any]:
+    raw = json.loads(record.raw_json) if record.raw_json else {}
+    message = _message_payload(
+        role=record.role,
+        content=record.content,
+        tool_call_id=record.tool_call_id,
+        name=record.name,
+    )
+    if record.role == "assistant" and raw.get("tool_calls"):
+        message["tool_calls"] = [
+            {
+                "id": item["id"],
+                "type": "function",
+                "function": {
+                    "name": item["name"],
+                    "arguments": item["arguments"],
+                },
+            }
+            for item in raw["tool_calls"]
+        ]
+    return message
+
+
+def _message_payload(
+    *,
+    role: str,
+    content: str,
+    tool_call_id: str | None = None,
+    name: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"role": role, "content": content}
+    if tool_call_id:
+        payload["tool_call_id"] = tool_call_id
+    if name:
+        payload["name"] = name
+    return payload
+
+
+def _approval_rejection_message(user_feedback: str | None) -> str:
+    if user_feedback:
+        return f"Tool execution rejected by user. Feedback: {user_feedback}"
+    return "Tool execution rejected by user."
 
 
 def create_agent_loop(
@@ -424,8 +721,6 @@ def _create_tool_registry(settings: AppSettings) -> ToolRegistry:
     from app.tools import workspace
 
     registry = ToolRegistry()
-
-    # Register workspace tools
     workspace_specs = workspace.get_tool_specs()
 
     for spec in workspace_specs:
