@@ -55,6 +55,7 @@ def test_registry_registers_lists_and_calls_tools() -> None:
     registry.register(spec)
 
     assert registry.get("list_files") == spec
+    assert registry.list_tools() == [spec]
     assert registry.list() == [spec]
     assert registry.openai_tools() == [spec.to_openai_tool()]
     assert run(registry.call("list_files", {"path": "."})) == "listing:."

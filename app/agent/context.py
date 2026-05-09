@@ -75,16 +75,10 @@ class ContextBuilder:
         if self.budget.include_system and system_prompt:
             system_content = system_prompt
             if summary:
-                system_content = (
-                    f"[Prior conversation summary]:\n{summary}\n\n"
-                    f"[Current session]:\n{system_prompt}"
-                )
+                system_content = f"[Prior conversation summary]:\n{summary}\n\n[Current session]:\n{system_prompt}"
 
             if len(system_content) > self.budget.max_system_chars:
-                system_content = (
-                    f"{system_content[: self.budget.max_system_chars - 50]}"
-                    "\n... [truncated]"
-                )
+                system_content = f"{system_content[: self.budget.max_system_chars - 50]}\n... [truncated]"
                 truncated = True
 
             output_messages.append({"role": "system", "content": system_content})
@@ -107,24 +101,27 @@ class ContextBuilder:
         selected_messages: list[MessageForContext] = []
 
         # Take newest messages first until budget is exhausted
-        for msg in reversed(msg_for_context):
-            msg_chars = len(msg.content) + 50  # +50 for role/name overhead
+        for context_msg in reversed(msg_for_context):
+            msg_chars = len(context_msg.content) + 50  # +50 for role/name overhead
 
             if available_budget - msg_chars < 0:
                 truncated = True
                 break
 
-            selected_messages.insert(0, msg)
+            selected_messages.insert(0, context_msg)
             available_budget -= msg_chars
             total_chars += msg_chars
 
         # Convert to message dicts
-        for msg in selected_messages:
-            msg_dict: dict[str, Any] = {"role": msg.role, "content": msg.content}
-            if msg.tool_call_id:
-                msg_dict["tool_call_id"] = msg.tool_call_id
-            if msg.name:
-                msg_dict["name"] = msg.name
+        for context_msg in selected_messages:
+            msg_dict: dict[str, Any] = {
+                "role": context_msg.role,
+                "content": context_msg.content,
+            }
+            if context_msg.tool_call_id:
+                msg_dict["tool_call_id"] = context_msg.tool_call_id
+            if context_msg.name:
+                msg_dict["name"] = context_msg.name
             output_messages.append(msg_dict)
 
         return BuiltContext(

@@ -84,9 +84,7 @@ class AppSettings:
         env_file: Path | None = None,
     ) -> "AppSettings":
         merged_env = load_environment(environ=environ, env_file=env_file)
-        workspace_root = Path(
-            merged_env.get("ML_COPILOT_WORKSPACE_ROOT", str(AppPaths.default().workspace_root))
-        )
+        workspace_root = Path(merged_env.get("ML_COPILOT_WORKSPACE_ROOT", str(AppPaths.default().workspace_root)))
         paths = AppPaths.from_workspace_root(workspace_root)
 
         db_path = Path(

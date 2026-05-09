@@ -1,0 +1,121 @@
+name: Quality
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    name: Pre-commit Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pre-commit
+        run: pip install pre-commit
+
+      - name: Run pre-commit hooks
+        run: pre-commit run --all-files
+
+  format-check:
+    name: Format Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Check import order
+        run: ruff check app/ --select=I --output-format=github
+
+      - name: Check code complexity
+        run: ruff check app/ --select=C --output-format=github
+        continue-on-error: true
+
+      - name: Check unused imports
+        run: ruff check app/ --select=F401,F403,F405,F811 --output-format=github
+
+  pyright:
+    name: Pyright Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install pyright
+        run: |
+          pip install pyright
+
+      - name: Run pyright
+        run: pyright app/ --outputjson 2>&1 || true
+        continue-on-error: true
+
+  complexity-check:
+    name: Code Complexity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install radon
+        run: pip install radon
+
+      - name: Check cyclomatic complexity
+        run: radon cc app/ -a -e "*/tests/*" --min B
+        continue-on-error: true
+
+      - name: Check maintainability index
+        run: radon mi app/ -e "*/tests/*" --min 10
+        continue-on-error: true
+
+  dead-code:
+    name: Dead Code Detection
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install vulture
+        run: pip install vulture
+
+      - name: Find dead code
+        run: vulture app/ --min-confidence 80 | head -20 || true
+        continue-on-error: true

@@ -1,0 +1,74 @@
+name: Bug Report
+description: Report a bug in ML Copilot
+title: "[BUG] "
+labels: ["bug", "triage"]
+assignees: ""
+body:
+  - type: markdown
+    id: description
+    attributes:
+      title: Bug Description
+      description: Clear and concise description of the bug
+      placeholder: |
+        ## Bug Description
+        A clear and concise description of what the bug is.
+
+  - type: markdown
+    id: steps
+    attributes:
+      title: Steps to Reproduce
+      description: List the steps to reproduce the bug
+      placeholder: |
+        ## Steps to Reproduce
+        1. Go to '...'
+        2. Run '...'
+        3. See error
+
+  - type: markdown
+    id: expected
+    attributes:
+      title: Expected Behavior
+      description: What you expected to happen
+      placeholder: |
+        ## Expected Behavior
+        What should happen
+
+  - type: markdown
+    id: actual
+    attributes:
+      title: Actual Behavior
+      description: What actually happens
+      placeholder: |
+        ## Actual Behavior
+        What actually happens
+
+  - type: markdown
+    id: environment
+    attributes:
+      title: Environment
+      description: Environment details
+      placeholder: |
+        ## Environment
+        - OS: [e.g. macOS, Ubuntu]
+        - Python version: [e.g. 3.12.0]
+        - ml-copilot version: [e.g. 0.1.0]
+
+  - type: markdown
+    id: logs
+    attributes:
+      title: Relevant Logs
+      description: Include any relevant log output
+      placeholder: |
+        ## Relevant Logs
+        ```
+        Paste logs here
+        ```
+
+  - type: markdown
+    id: context
+    attributes:
+      title: Additional Context
+      description: Add any other context about the problem here
+      placeholder: |
+        ## Additional Context
+        Any other context about the problem

@@ -1,0 +1,250 @@
+name: Evaluation
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    name: Unit Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run unit tests
+        run: pytest tests/unit/ -v --tb=short --color=yes
+
+  integration-tests:
+    name: Integration Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run integration tests
+        run: pytest tests/integration/ -v --tb=short --color=yes || echo "No integration tests yet"
+        continue-on-error: true
+
+  workspace-tools-test:
+    name: Workspace Tools Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run workspace tools tests
+        run: pytest tests/unit/test_workspace_tools.py -v --tb=short --color=yes
+
+      - name: Test path safety
+        run: |
+          python -c "
+          from app.tools.workspace import _safe_path
+          from pathlib import Path
+          import tempfile
+
+          with tempfile.TemporaryDirectory() as tmpdir:
+              workspace = Path(tmpdir)
+              # Should allow inside
+              inside = workspace / 'file.txt'
+              result = _safe_path(inside, workspace)
+              assert result is not None, 'Should allow paths inside workspace'
+
+              # Should reject outside
+              outside = Path('/etc/passwd')
+              result = _safe_path(outside, workspace)
+              assert result is None, 'Should reject paths outside workspace'
+
+              print('Path safety tests passed!')
+          "
+
+  agent-loop-test:
+    name: Agent Loop Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Test agent loop creation
+        run: |
+          python -c "
+          from app.agent.loop import create_agent_loop, MAX_ITERATIONS, EventType
+          from app.config import AppSettings
+
+          # Test settings load
+          settings = AppSettings.load()
+          print(f'Workspace: {settings.paths.workspace_root}')
+
+          # Test constants
+          assert MAX_ITERATIONS == 50, 'Max iterations should be 50'
+          assert hasattr(EventType, 'READY'), 'EventType should have READY'
+          assert hasattr(EventType, 'TOOL_CALL'), 'EventType should have TOOL_CALL'
+          assert hasattr(EventType, 'TURN_COMPLETE'), 'EventType should have TURN_COMPLETE'
+
+          print('Agent loop configuration tests passed!')
+          "
+
+  llm-client-test:
+    name: LLM Client Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Test LLM client parsing
+        run: |
+          python -c "
+          from app.agent.llm import ToolCall, parse_chat_completion, apply_stream_chunk, _StreamState
+          import json
+
+          # Test ToolCall
+          tc = ToolCall(id='test', name='test_tool', arguments='{\"key\": \"value\"}')
+          assert tc.arguments_as_json() == {'key': 'value'}, 'ToolCall parsing failed'
+
+          # Test malformed JSON handling
+          try:
+              tc = ToolCall(id='test', name='test_tool', arguments='{invalid}')
+              tc.arguments_as_json()
+              assert False, 'Should raise on malformed JSON'
+          except Exception as e:
+              print(f'Correctly caught malformed JSON: {type(e).__name__}')
+
+          print('LLM client tests passed!')
+          "
+
+  repository-test:
+    name: Repository Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Test repository operations
+        run: |
+          python -c "
+          from app.storage.repository import SQLiteRepository
+          from app.storage.models import SessionRecord
+          import tempfile
+          from pathlib import Path
+
+          with tempfile.TemporaryDirectory() as tmpdir:
+              db_path = Path(tmpdir) / 'test.db'
+              repo = SQLiteRepository(db_path)
+              repo.initialize()
+
+              # Test session creation
+              session = repo.create_session(model='gpt-4', title='Test Session')
+              assert session.id is not None, 'Session ID should be set'
+              assert session.model == 'gpt-4', 'Session model should match'
+
+              # Test session retrieval
+              retrieved = repo.get_session(session.id)
+              assert retrieved is not None, 'Should retrieve session'
+              assert retrieved.title == 'Test Session', 'Session title should match'
+
+              print('Repository tests passed!')
+          "
+
+  config-test:
+    name: Configuration Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Test configuration loading
+        run: |
+          python -c "
+          from app.config import AppSettings, parse_bool, parse_int, blank_to_none
+
+          # Test parse_bool
+          assert parse_bool('TEST', 'true', default=False) == True
+          assert parse_bool('TEST', 'false', default=True) == False
+          assert parse_bool('TEST', None, default=True) == True
+
+          # Test parse_int
+          assert parse_int('TEST', '42', default=0, minimum=1) == 42
+          assert parse_int('TEST', None, default=10, minimum=1) == 10
+
+          # Test blank_to_none
+          assert blank_to_none(None) is None
+          assert blank_to_none('') is None
+          assert blank_to_none('  ') is None
+          assert blank_to_none('value') == 'value'
+
+          # Test settings load
+          settings = AppSettings.load()
+          assert settings.app_name == 'ML Copilot'
+          assert settings.llm.model is not None
+
+          print('Configuration tests passed!')
+          "

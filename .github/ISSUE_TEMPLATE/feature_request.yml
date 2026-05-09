@@ -1,0 +1,45 @@
+name: Feature Request
+description: Suggest a new feature for ML Copilot
+title: "[FEATURE] "
+labels: ["enhancement", "triage"]
+assignees: ""
+body:
+  - type: markdown
+    id: context
+    attributes:
+      title: Context
+      description: Describe the feature you're requesting and why it would be valuable
+      placeholder: |
+        ## Context
+        What problem does this solve? Why is this needed?
+
+  - type: markdown
+    id: scope
+    attributes:
+      title: Scope
+      description: Define the expected scope and behavior
+      placeholder: |
+        ## Expected Behavior
+        - What should happen?
+        - What should NOT happen?
+
+  - type: markdown
+    id: alternatives
+    attributes:
+      title: Alternatives Considered
+      description: Any alternative approaches you've considered
+      placeholder: |
+        ## Alternatives
+        - Alternative 1
+        - Alternative 2
+
+  - type: markdown
+    id: references
+    attributes:
+      title: References
+      description: Links to relevant docs, issues, or research
+      placeholder: |
+        ## References
+        - Related issue: #
+        - Documentation: [link](url)
+        - Research paper: [link](url)

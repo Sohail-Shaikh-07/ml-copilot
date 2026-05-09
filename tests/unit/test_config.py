@@ -48,7 +48,10 @@ def test_load_uses_env_values_and_defaults(tmp_path: Path) -> None:
 
 def test_environment_prefers_process_env_over_env_file(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
-    env_file.write_text("LLM_MODEL=file-model\nLLM_BASE_URL=https://example.invalid/v1\n", encoding="utf-8")
+    env_file.write_text(
+        "LLM_MODEL=file-model\nLLM_BASE_URL=https://example.invalid/v1\n",
+        encoding="utf-8",
+    )
 
     loaded = load_environment(
         environ={"LLM_MODEL": "process-model"},
@@ -62,7 +65,7 @@ def test_environment_prefers_process_env_over_env_file(tmp_path: Path) -> None:
 def test_read_env_file_strips_quotes_and_comments(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(
-        '# comment\nLLM_MODEL="quoted-model"\nLLM_API_KEY=\'token\'\n',
+        "# comment\nLLM_MODEL=\"quoted-model\"\nLLM_API_KEY='token'\n",
         encoding="utf-8",
     )
 

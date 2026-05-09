@@ -8,10 +8,7 @@ def test_initialize_creates_expected_tables(tmp_path: Path) -> None:
 
     repository.initialize()
 
-    table_names = {
-        row[0]
-        for row in repository_path_tables(repository.database_path)
-    }
+    table_names = {row[0] for row in repository_path_tables(repository.database_path)}
 
     assert {
         "sessions",

@@ -3,7 +3,13 @@ import json
 
 import httpx
 
-from app.agent.llm import LLMClient, LLMProtocolError, ToolCall, apply_stream_chunk, parse_chat_completion
+from app.agent.llm import (
+    LLMClient,
+    LLMProtocolError,
+    ToolCall,
+    apply_stream_chunk,
+    parse_chat_completion,
+)
 from app.config import AppSettings
 
 
@@ -36,7 +42,7 @@ def test_parse_chat_completion_reads_content_tool_calls_and_usage() -> None:
                                 "type": "function",
                                 "function": {
                                     "name": "read_file",
-                                    "arguments": "{\"path\":\"README.md\"}",
+                                    "arguments": '{"path":"README.md"}',
                                 },
                             }
                         ],
@@ -129,7 +135,7 @@ def test_apply_stream_chunk_accumulates_content_tool_calls_and_usage() -> None:
                                 "type": "function",
                                 "function": {
                                     "name": "list_files",
-                                    "arguments": "{\"path\":",
+                                    "arguments": '{"path":',
                                 },
                             }
                         ],
@@ -152,7 +158,7 @@ def test_apply_stream_chunk_accumulates_content_tool_calls_and_usage() -> None:
                             {
                                 "index": 0,
                                 "function": {
-                                    "arguments": "\".\"}",
+                                    "arguments": '"."}',
                                 },
                             }
                         ],
@@ -271,10 +277,65 @@ def test_client_non_streaming_chat_uses_openai_shape() -> None:
 
 
 def test_client_streaming_chat_aggregates_sse_chunks() -> None:
+    first_chunk = {
+        "id": "resp_stream",
+        "model": "demo-model",
+        "choices": [
+            {
+                "delta": {"content": "Hello "},
+                "finish_reason": None,
+            }
+        ],
+    }
+    second_chunk = {
+        "id": "resp_stream",
+        "model": "demo-model",
+        "choices": [
+            {
+                "delta": {
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "search_text",
+                                "arguments": '{"query":',
+                            },
+                        }
+                    ]
+                },
+                "finish_reason": None,
+            }
+        ],
+    }
+    third_chunk = {
+        "id": "resp_stream",
+        "model": "demo-model",
+        "choices": [
+            {
+                "delta": {
+                    "content": "there",
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "function": {"arguments": '"ml"}'},
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 11,
+            "completion_tokens": 4,
+            "total_tokens": 15,
+        },
+    }
     lines = [
-        'data: {"id":"resp_stream","model":"demo-model","choices":[{"delta":{"content":"Hello "},"finish_reason":null}]}',
-        'data: {"id":"resp_stream","model":"demo-model","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"search_text","arguments":"{\\"query\\":"}}]},"finish_reason":null}]}',
-        'data: {"id":"resp_stream","model":"demo-model","choices":[{"delta":{"content":"there","tool_calls":[{"index":0,"function":{"arguments":"\\"ml\\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":11,"completion_tokens":4,"total_tokens":15}}',
+        f"data: {json.dumps(first_chunk, separators=(',', ':'))}",
+        f"data: {json.dumps(second_chunk, separators=(',', ':'))}",
+        f"data: {json.dumps(third_chunk, separators=(',', ':'))}",
         "data: [DONE]",
     ]
 
@@ -286,7 +347,12 @@ def test_client_streaming_chat_aggregates_sse_chunks() -> None:
         )
 
     client = LLMClient.from_settings(
-        AppSettings.load(environ={"LLM_BASE_URL": "https://example.invalid/v1", "LLM_MODEL": "demo-model"}),
+        AppSettings.load(
+            environ={
+                "LLM_BASE_URL": "https://example.invalid/v1",
+                "LLM_MODEL": "demo-model",
+            }
+        ),
         http_client=httpx.AsyncClient(
             transport=httpx.MockTransport(handler),
             base_url="https://example.invalid/v1",
