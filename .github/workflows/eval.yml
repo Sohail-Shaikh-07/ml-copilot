@@ -183,7 +183,6 @@ jobs:
         run: |
           python -c "
           from app.storage.repository import SQLiteRepository
-          from app.storage.models import SessionRecord
           import tempfile
           from pathlib import Path
 
@@ -201,6 +200,10 @@ jobs:
               retrieved = repo.get_session(session.id)
               assert retrieved is not None, 'Should retrieve session'
               assert retrieved.title == 'Test Session', 'Session title should match'
+
+              del retrieved
+              del session
+              del repo
 
               print('Repository tests passed!')
           "

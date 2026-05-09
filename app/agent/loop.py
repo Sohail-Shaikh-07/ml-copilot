@@ -12,7 +12,7 @@ from app.agent.llm import LLMClient
 from app.config import AppSettings
 from app.storage.models import MessageRecord, PendingApprovalRecord, SessionRecord
 from app.storage.repository import SQLiteRepository
-from app.tools.registry import ToolRegistry, ToolSpec
+from app.tools.registry import ToolHandler, ToolRegistry, ToolSpec, UnknownToolError
 
 logger = logging.getLogger(__name__)
 
@@ -731,11 +731,11 @@ def _create_tool_registry(settings: AppSettings) -> ToolRegistry:
     return registry
 
 
-def _get_workspace_handler(name: str, settings: AppSettings):
+def _get_workspace_handler(name: str, settings: AppSettings) -> ToolHandler:
     """Get the handler function for a workspace tool."""
     from app.tools import workspace as ws
 
-    handlers = {
+    handlers: dict[str, ToolHandler] = {
         "list_files": lambda args: ws.list_files_handler(args, settings),
         "read_file": lambda args: ws.read_file_handler(args, settings),
         "search_text": lambda args: ws.search_text_handler(args, settings),
@@ -743,4 +743,7 @@ def _get_workspace_handler(name: str, settings: AppSettings):
         "git_diff": lambda args: ws.git_diff_handler(args, settings),
     }
 
-    return handlers.get(name)
+    try:
+        return handlers[name]
+    except KeyError as exc:
+        raise UnknownToolError(f"Workspace tool handler is not registered for {name!r}.") from exc
