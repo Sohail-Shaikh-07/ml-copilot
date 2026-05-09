@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import logging
 
 from app.agent.loop import create_agent_loop
@@ -86,46 +85,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--prompt",
         type=str,
         help="Optional new prompt to send",
-    )
-
-    approvals_parser = subparsers.add_parser("approvals", help="List pending tool approvals")
-    approvals_parser.add_argument(
-        "--session",
-        type=str,
-        help="Filter pending approvals to a single session",
-    )
-
-    approve_parser = subparsers.add_parser("approve", help="Approve a pending tool call")
-    approve_parser.add_argument("approval_id", type=str, help="Approval ID to approve")
-    approve_parser.add_argument(
-        "--session",
-        type=str,
-        required=True,
-        help="Session ID that owns the approval",
-    )
-    approve_parser.add_argument(
-        "--feedback",
-        type=str,
-        help="Optional feedback to persist with the approval decision",
-    )
-    approve_parser.add_argument(
-        "--edited-args",
-        type=str,
-        help="Optional JSON object to replace the tool arguments before execution",
-    )
-
-    reject_parser = subparsers.add_parser("reject", help="Reject a pending tool call")
-    reject_parser.add_argument("approval_id", type=str, help="Approval ID to reject")
-    reject_parser.add_argument(
-        "--session",
-        type=str,
-        required=True,
-        help="Session ID that owns the approval",
-    )
-    reject_parser.add_argument(
-        "--feedback",
-        type=str,
-        help="Optional feedback to persist with the rejection",
     )
 
     return parser
@@ -215,23 +174,6 @@ async def list_sessions(repository) -> None:
         print(f"{s.id:<40} {title[:28]:<30} {s.status:<10} {s.created_at:<30}")
 
 
-async def list_pending_approvals(repository, session_id: str | None = None) -> None:
-    """List pending tool approvals."""
-    pending = repository.list_pending_approvals(session_id)
-    if not pending:
-        print("No pending approvals found.")
-        return
-
-    print(f"{'Approval ID':<40} {'Session ID':<40} {'Tool':<20} {'Requested'}")
-    print("-" * 130)
-    for item in pending:
-        print(
-            f"{item.approval.id:<40} {item.approval.session_id:<40} "
-            f"{item.tool_call.tool_name:<20} {item.approval.requested_at}"
-        )
-        print(f"  arguments={item.tool_call.arguments_json}")
-
-
 async def cmd_run(args: argparse.Namespace, settings: AppSettings) -> int:
     """Execute the 'run' command."""
     # Combine prompt arguments
@@ -312,62 +254,6 @@ async def cmd_resume(args: argparse.Namespace, settings: AppSettings) -> int:
     return 0
 
 
-async def cmd_approvals(args: argparse.Namespace, settings: AppSettings) -> int:
-    """Execute the 'approvals' command."""
-    repo = _get_sync_repo(settings)
-    await list_pending_approvals(repo, args.session)
-    return 0
-
-
-async def cmd_approve(args: argparse.Namespace, settings: AppSettings) -> int:
-    """Execute the 'approve' command."""
-    loop = create_agent_loop(settings)
-    session = loop.repo.get_session(args.session)
-    if not session:
-        print(f"Error: Session {args.session} not found")
-        return 1
-
-    edited_arguments = None
-    if args.edited_args:
-        try:
-            parsed = json.loads(args.edited_args)
-        except json.JSONDecodeError as exc:
-            print(f"Error: --edited-args must be valid JSON: {exc}")
-            return 1
-        if not isinstance(parsed, dict):
-            print("Error: --edited-args must decode to a JSON object")
-            return 1
-        edited_arguments = parsed
-
-    result = await loop.resume_pending_approval(
-        session,
-        args.approval_id,
-        approved=True,
-        user_feedback=args.feedback,
-        edited_arguments=edited_arguments,
-    )
-    print(f"Approval processed. Status: {result['status']}")
-    return 0
-
-
-async def cmd_reject(args: argparse.Namespace, settings: AppSettings) -> int:
-    """Execute the 'reject' command."""
-    loop = create_agent_loop(settings)
-    session = loop.repo.get_session(args.session)
-    if not session:
-        print(f"Error: Session {args.session} not found")
-        return 1
-
-    result = await loop.resume_pending_approval(
-        session,
-        args.approval_id,
-        approved=False,
-        user_feedback=args.feedback,
-    )
-    print(f"Approval processed. Status: {result['status']}")
-    return 0
-
-
 def _get_sync_repo(settings: AppSettings):
     """Get a synchronous repository for simple operations."""
     from app.storage.repository import SQLiteRepository
@@ -404,12 +290,6 @@ def main() -> int:
             return asyncio.run(cmd_sessions(args, settings))
         elif args.command == "resume":
             return asyncio.run(cmd_resume(args, settings))
-        elif args.command == "approvals":
-            return asyncio.run(cmd_approvals(args, settings))
-        elif args.command == "approve":
-            return asyncio.run(cmd_approve(args, settings))
-        elif args.command == "reject":
-            return asyncio.run(cmd_reject(args, settings))
         else:
             parser.print_help()
             return 0
