@@ -190,6 +190,21 @@ class AgentLoop:
                 edited_arguments=edited_arguments,
             )
 
+        remaining_approvals = self.repo.list_pending_approvals(session.id)
+        if remaining_approvals:
+            pending_payloads = _serialize_pending_approvals(remaining_approvals)
+            await self.emit_event(
+                ctx,
+                EventType.APPROVAL_REQUIRED,
+                {"tools": pending_payloads, "count": len(pending_payloads)},
+            )
+            return {
+                "status": "approval_required",
+                "pending_approvals": pending_payloads,
+                "approval_ids": [item["approval_id"] for item in pending_payloads],
+                "resolved_approval_id": approval_id,
+            }
+
         return await self._run_loop(session, ctx)
 
     def interrupt(self) -> None:
@@ -685,6 +700,20 @@ def _approval_rejection_message(user_feedback: str | None) -> str:
     if user_feedback:
         return f"Tool execution rejected by user. Feedback: {user_feedback}"
     return "Tool execution rejected by user."
+
+
+def _serialize_pending_approvals(
+    pending_approvals: list[PendingApprovalRecord],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "approval_id": pending_approval.approval.id,
+            "tool_call_id": pending_approval.tool_call.id,
+            "tool_name": pending_approval.tool_call.tool_name,
+            "arguments": json.loads(pending_approval.tool_call.arguments_json),
+        }
+        for pending_approval in pending_approvals
+    ]
 
 
 def create_agent_loop(

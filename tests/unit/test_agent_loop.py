@@ -170,3 +170,79 @@ async def test_rejecting_pending_approval_resumes_loop_with_tool_feedback(tmp_pa
     assert any(
         message["role"] == "tool" and "rejected by user" in message["content"] for message in second_call_messages
     )
+
+
+@pytest.mark.asyncio
+async def test_multiple_pending_approvals_wait_until_all_decisions_are_recorded(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+    session = repository.create_session(session_id="session-1", title="Batch", model="gpt-5.4")
+    tool_invocations: list[dict[str, object]] = []
+    llm = DummyLLM(
+        responses=[
+            LLMResponse(
+                model="gpt-5.4",
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        id="call-1",
+                        name="run_command",
+                        arguments='{"command":"pytest"}',
+                    ),
+                    ToolCall(
+                        id="call-2",
+                        name="run_command",
+                        arguments='{"command":"ruff check app"}',
+                    ),
+                ],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(
+                model="gpt-5.4",
+                content="Both approved commands completed.",
+                finish_reason="stop",
+            ),
+        ]
+    )
+    loop = AgentLoop(
+        llm_client=llm,
+        tool_registry=_registry("command ok", tool_invocations),
+        repository=repository,
+        settings=_settings(tmp_path),
+    )
+
+    first_result = await loop.run_turn(session, "Run both checks")
+    pending = repository.list_pending_approvals(session.id)
+
+    assert first_result["status"] == "approval_required"
+    assert len(pending) == 2
+    assert len(llm.calls) == 1
+
+    second_result = await loop.resume_pending_approval(
+        session,
+        pending[0].approval.id,
+        approved=True,
+        user_feedback="approve first",
+    )
+
+    remaining_pending = repository.list_pending_approvals(session.id)
+    assert second_result["status"] == "approval_required"
+    assert len(second_result["pending_approvals"]) == 1
+    assert len(remaining_pending) == 1
+    assert remaining_pending[0].tool_call.id == "call-2"
+    assert len(llm.calls) == 1
+    assert tool_invocations == [{"command": "pytest"}]
+
+    final_result = await loop.resume_pending_approval(
+        session,
+        remaining_pending[0].approval.id,
+        approved=True,
+        user_feedback="approve second",
+    )
+
+    final_messages = llm.calls[1]["messages"]
+
+    assert final_result["status"] == "complete"
+    assert repository.list_pending_approvals(session.id) == []
+    assert len(llm.calls) == 2
+    assert tool_invocations == [{"command": "pytest"}, {"command": "ruff check app"}]
+    assert any(message["role"] == "tool" and message["content"] == "command ok" for message in final_messages)
