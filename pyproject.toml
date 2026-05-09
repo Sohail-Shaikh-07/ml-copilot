@@ -11,11 +11,19 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3.0,<9.0.0",
+    "pytest-cov>=4.1.0,<5.0.0",
     "ruff>=0.11.0,<0.12.0",
+    "mypy>=1.10.0,<2.0.0",
+    "types-requests>=2.31.0",
+    "bandit>=1.7.0,<2.0.0",
+    "safety>=3.0.0,<4.0.0",
+    "pre-commit>=3.6.0,<4.0.0",
+    "vulture>=2.10,<3.0",
+    "radon>=6.0.0,<7.0.0",
 ]
 
 [build-system]
-requires = ["setuptools>=69.0"]
+requires = ["setuptools>=69.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
@@ -37,4 +45,19 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B"]
+select = ["E", "F", "I", "B", "C"]
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+omit = ["*/tests/*", "*/__pycache__/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+show_missing = true
+fail_under = 70
