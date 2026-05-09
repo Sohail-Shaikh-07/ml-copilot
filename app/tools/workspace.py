@@ -93,7 +93,7 @@ def _iter_search_files(
     extension_filter: str | None,
 ) -> Iterator[Path]:
     """Yield searchable files within the workspace."""
-    for item in search_root.rglob("*"):
+    for item in sorted(search_root.rglob("*")):
         if not item.is_file():
             continue
         if _should_skip_search_path(item, search_root):
