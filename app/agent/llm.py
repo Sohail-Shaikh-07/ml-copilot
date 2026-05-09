@@ -205,7 +205,7 @@ class _ClientContextManager:
     async def __aenter__(self) -> httpx.AsyncClient:
         return self._client
 
-    async def __aexit__(self, exc_type, exc, tb) -> None:
+    async def __aexit__(self, _exc_type, _exc, _tb) -> None:
         if self._close_on_exit:
             await self._client.aclose()
 

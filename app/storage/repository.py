@@ -8,7 +8,16 @@ import uuid
 from pathlib import Path
 
 from app.db import connect_sqlite
-from app.storage.models import EventRecord, MessageRecord, SessionHistory, SessionRecord, utc_now
+from app.storage.models import (
+    ApprovalRecord,
+    EventRecord,
+    MessageRecord,
+    PendingApprovalRecord,
+    SessionHistory,
+    SessionRecord,
+    ToolCallRecord,
+    utc_now,
+)
 
 SCHEMA_STATEMENTS = (
     """
@@ -302,6 +311,18 @@ class SQLiteRepository:
             ).fetchall()
         return [_message_from_row(row) for row in rows]
 
+    def next_message_sequence(self, session_id: str) -> int:
+        with connect_sqlite(self.database_path) as connection:
+            row = connection.execute(
+                """
+                SELECT COALESCE(MAX(sequence), -1) AS max_sequence
+                FROM messages
+                WHERE session_id = ?
+                """,
+                (session_id,),
+            ).fetchone()
+        return int(row["max_sequence"]) + 1
+
     def add_event(
         self,
         *,
@@ -375,6 +396,371 @@ class SQLiteRepository:
             ).fetchall()
         return [_event_from_row(row) for row in rows]
 
+    def next_event_sequence(self, session_id: str) -> int:
+        with connect_sqlite(self.database_path) as connection:
+            row = connection.execute(
+                """
+                SELECT COALESCE(MAX(sequence), -1) AS max_sequence
+                FROM events
+                WHERE session_id = ?
+                """,
+                (session_id,),
+            ).fetchone()
+        return int(row["max_sequence"]) + 1
+
+    def add_tool_call(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        tool_name: str,
+        arguments: dict | None,
+        status: str,
+        requires_approval: bool,
+        approval_id: str | None = None,
+        started_at: str | None = None,
+        finished_at: str | None = None,
+        output: str | None = None,
+        success: bool | None = None,
+        error: str | None = None,
+        tool_call_id: str | None = None,
+    ) -> ToolCallRecord:
+        record = ToolCallRecord(
+            id=tool_call_id or str(uuid.uuid4()),
+            session_id=session_id,
+            turn_id=turn_id,
+            tool_name=tool_name,
+            arguments_json=json.dumps(arguments or {}, sort_keys=True),
+            status=status,
+            requires_approval=requires_approval,
+            approval_id=approval_id,
+            started_at=started_at,
+            finished_at=finished_at,
+            output=output,
+            success=success,
+            error=error,
+        )
+        with connect_sqlite(self.database_path) as connection:
+            connection.execute(
+                """
+                INSERT INTO tool_calls (
+                    id,
+                    session_id,
+                    turn_id,
+                    tool_name,
+                    arguments_json,
+                    status,
+                    requires_approval,
+                    approval_id,
+                    started_at,
+                    finished_at,
+                    output,
+                    success,
+                    error
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.id,
+                    record.session_id,
+                    record.turn_id,
+                    record.tool_name,
+                    record.arguments_json,
+                    record.status,
+                    1 if record.requires_approval else 0,
+                    record.approval_id,
+                    record.started_at,
+                    record.finished_at,
+                    record.output,
+                    None if record.success is None else int(record.success),
+                    record.error,
+                ),
+            )
+            self._touch_session(connection, session_id)
+            connection.commit()
+        return record
+
+    def get_tool_call(self, tool_call_id: str) -> ToolCallRecord | None:
+        with connect_sqlite(self.database_path) as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    id,
+                    session_id,
+                    turn_id,
+                    tool_name,
+                    arguments_json,
+                    status,
+                    requires_approval,
+                    approval_id,
+                    started_at,
+                    finished_at,
+                    output,
+                    success,
+                    error
+                FROM tool_calls
+                WHERE id = ?
+                """,
+                (tool_call_id,),
+            ).fetchone()
+        return _tool_call_from_row(row) if row else None
+
+    def update_tool_call(
+        self,
+        tool_call_id: str,
+        *,
+        status: str | None = None,
+        approval_id: str | None = None,
+        arguments: dict | None = None,
+        started_at: str | None = None,
+        finished_at: str | None = None,
+        output: str | None = None,
+        success: bool | None = None,
+        error: str | None = None,
+    ) -> ToolCallRecord:
+        current = self.get_tool_call(tool_call_id)
+        if current is None:
+            raise KeyError(f"Unknown tool call: {tool_call_id}")
+
+        record = ToolCallRecord(
+            id=current.id,
+            session_id=current.session_id,
+            turn_id=current.turn_id,
+            tool_name=current.tool_name,
+            arguments_json=(json.dumps(arguments, sort_keys=True) if arguments is not None else current.arguments_json),
+            status=status if status is not None else current.status,
+            requires_approval=current.requires_approval,
+            approval_id=approval_id if approval_id is not None else current.approval_id,
+            started_at=started_at if started_at is not None else current.started_at,
+            finished_at=finished_at if finished_at is not None else current.finished_at,
+            output=output if output is not None else current.output,
+            success=success if success is not None else current.success,
+            error=error if error is not None else current.error,
+        )
+        with connect_sqlite(self.database_path) as connection:
+            connection.execute(
+                """
+                UPDATE tool_calls
+                SET
+                    arguments_json = ?,
+                    status = ?,
+                    approval_id = ?,
+                    started_at = ?,
+                    finished_at = ?,
+                    output = ?,
+                    success = ?,
+                    error = ?
+                WHERE id = ?
+                """,
+                (
+                    record.arguments_json,
+                    record.status,
+                    record.approval_id,
+                    record.started_at,
+                    record.finished_at,
+                    record.output,
+                    None if record.success is None else int(record.success),
+                    record.error,
+                    record.id,
+                ),
+            )
+            self._touch_session(connection, record.session_id)
+            connection.commit()
+        return record
+
+    def list_tool_calls(self, session_id: str) -> list[ToolCallRecord]:
+        with connect_sqlite(self.database_path) as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    id,
+                    session_id,
+                    turn_id,
+                    tool_name,
+                    arguments_json,
+                    status,
+                    requires_approval,
+                    approval_id,
+                    started_at,
+                    finished_at,
+                    output,
+                    success,
+                    error
+                FROM tool_calls
+                WHERE session_id = ?
+                ORDER BY started_at ASC, id ASC
+                """,
+                (session_id,),
+            ).fetchall()
+        return [_tool_call_from_row(row) for row in rows]
+
+    def create_approval(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        tool_call_id: str,
+        status: str = "pending",
+        requested_at: str | None = None,
+        responded_at: str | None = None,
+        user_feedback: str | None = None,
+        edited_payload: dict | None = None,
+        approval_id: str | None = None,
+    ) -> ApprovalRecord:
+        record = ApprovalRecord(
+            id=approval_id or str(uuid.uuid4()),
+            session_id=session_id,
+            turn_id=turn_id,
+            tool_call_id=tool_call_id,
+            status=status,
+            requested_at=requested_at or utc_now(),
+            responded_at=responded_at,
+            user_feedback=user_feedback,
+            edited_payload_json=(json.dumps(edited_payload, sort_keys=True) if edited_payload is not None else None),
+        )
+        with connect_sqlite(self.database_path) as connection:
+            connection.execute(
+                """
+                INSERT INTO approvals (
+                    id,
+                    session_id,
+                    turn_id,
+                    tool_call_id,
+                    status,
+                    requested_at,
+                    responded_at,
+                    user_feedback,
+                    edited_payload_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.id,
+                    record.session_id,
+                    record.turn_id,
+                    record.tool_call_id,
+                    record.status,
+                    record.requested_at,
+                    record.responded_at,
+                    record.user_feedback,
+                    record.edited_payload_json,
+                ),
+            )
+            self._touch_session(connection, session_id)
+            connection.commit()
+        return record
+
+    def get_approval(self, approval_id: str) -> ApprovalRecord | None:
+        with connect_sqlite(self.database_path) as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    id,
+                    session_id,
+                    turn_id,
+                    tool_call_id,
+                    status,
+                    requested_at,
+                    responded_at,
+                    user_feedback,
+                    edited_payload_json
+                FROM approvals
+                WHERE id = ?
+                """,
+                (approval_id,),
+            ).fetchone()
+        return _approval_from_row(row) if row else None
+
+    def update_approval(
+        self,
+        approval_id: str,
+        *,
+        status: str | None = None,
+        responded_at: str | None = None,
+        user_feedback: str | None = None,
+        edited_payload: dict | None = None,
+    ) -> ApprovalRecord:
+        current = self.get_approval(approval_id)
+        if current is None:
+            raise KeyError(f"Unknown approval: {approval_id}")
+
+        record = ApprovalRecord(
+            id=current.id,
+            session_id=current.session_id,
+            turn_id=current.turn_id,
+            tool_call_id=current.tool_call_id,
+            status=status if status is not None else current.status,
+            requested_at=current.requested_at,
+            responded_at=responded_at if responded_at is not None else current.responded_at,
+            user_feedback=user_feedback if user_feedback is not None else current.user_feedback,
+            edited_payload_json=(
+                json.dumps(edited_payload, sort_keys=True)
+                if edited_payload is not None
+                else current.edited_payload_json
+            ),
+        )
+        with connect_sqlite(self.database_path) as connection:
+            connection.execute(
+                """
+                UPDATE approvals
+                SET
+                    status = ?,
+                    responded_at = ?,
+                    user_feedback = ?,
+                    edited_payload_json = ?
+                WHERE id = ?
+                """,
+                (
+                    record.status,
+                    record.responded_at,
+                    record.user_feedback,
+                    record.edited_payload_json,
+                    record.id,
+                ),
+            )
+            self._touch_session(connection, record.session_id)
+            connection.commit()
+        return record
+
+    def list_pending_approvals(self, session_id: str | None = None) -> list[PendingApprovalRecord]:
+        query = """
+            SELECT
+                a.id AS approval_id,
+                a.session_id AS approval_session_id,
+                a.turn_id AS approval_turn_id,
+                a.tool_call_id AS approval_tool_call_id,
+                a.status AS approval_status,
+                a.requested_at AS approval_requested_at,
+                a.responded_at AS approval_responded_at,
+                a.user_feedback AS approval_user_feedback,
+                a.edited_payload_json AS approval_edited_payload_json,
+                tc.id AS tool_call_id,
+                tc.session_id AS tool_call_session_id,
+                tc.turn_id AS tool_call_turn_id,
+                tc.tool_name AS tool_call_tool_name,
+                tc.arguments_json AS tool_call_arguments_json,
+                tc.status AS tool_call_status,
+                tc.requires_approval AS tool_call_requires_approval,
+                tc.approval_id AS tool_call_approval_id,
+                tc.started_at AS tool_call_started_at,
+                tc.finished_at AS tool_call_finished_at,
+                tc.output AS tool_call_output,
+                tc.success AS tool_call_success,
+                tc.error AS tool_call_error
+            FROM approvals a
+            INNER JOIN tool_calls tc ON tc.id = a.tool_call_id
+            WHERE a.status = 'pending'
+        """
+        params: tuple[str, ...] = ()
+        if session_id is not None:
+            query += " AND a.session_id = ?"
+            params = (session_id,)
+        query += " ORDER BY a.requested_at ASC, a.id ASC"
+
+        with connect_sqlite(self.database_path) as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [_pending_approval_from_row(row) for row in rows]
+
     def get_session_history(self, session_id: str) -> SessionHistory:
         session = self.get_session(session_id)
         if session is None:
@@ -443,4 +829,67 @@ def _event_from_row(row: sqlite3.Row) -> EventRecord:
         data_json=row["data_json"],
         sequence=row["sequence"],
         created_at=row["created_at"],
+    )
+
+
+def _tool_call_from_row(row: sqlite3.Row) -> ToolCallRecord:
+    return ToolCallRecord(
+        id=row["id"],
+        session_id=row["session_id"],
+        turn_id=row["turn_id"],
+        tool_name=row["tool_name"],
+        arguments_json=row["arguments_json"],
+        status=row["status"],
+        requires_approval=bool(row["requires_approval"]),
+        approval_id=row["approval_id"],
+        started_at=row["started_at"],
+        finished_at=row["finished_at"],
+        output=row["output"],
+        success=None if row["success"] is None else bool(row["success"]),
+        error=row["error"],
+    )
+
+
+def _approval_from_row(row: sqlite3.Row) -> ApprovalRecord:
+    return ApprovalRecord(
+        id=row["id"],
+        session_id=row["session_id"],
+        turn_id=row["turn_id"],
+        tool_call_id=row["tool_call_id"],
+        status=row["status"],
+        requested_at=row["requested_at"],
+        responded_at=row["responded_at"],
+        user_feedback=row["user_feedback"],
+        edited_payload_json=row["edited_payload_json"],
+    )
+
+
+def _pending_approval_from_row(row: sqlite3.Row) -> PendingApprovalRecord:
+    return PendingApprovalRecord(
+        approval=ApprovalRecord(
+            id=row["approval_id"],
+            session_id=row["approval_session_id"],
+            turn_id=row["approval_turn_id"],
+            tool_call_id=row["approval_tool_call_id"],
+            status=row["approval_status"],
+            requested_at=row["approval_requested_at"],
+            responded_at=row["approval_responded_at"],
+            user_feedback=row["approval_user_feedback"],
+            edited_payload_json=row["approval_edited_payload_json"],
+        ),
+        tool_call=ToolCallRecord(
+            id=row["tool_call_id"],
+            session_id=row["tool_call_session_id"],
+            turn_id=row["tool_call_turn_id"],
+            tool_name=row["tool_call_tool_name"],
+            arguments_json=row["tool_call_arguments_json"],
+            status=row["tool_call_status"],
+            requires_approval=bool(row["tool_call_requires_approval"]),
+            approval_id=row["tool_call_approval_id"],
+            started_at=row["tool_call_started_at"],
+            finished_at=row["tool_call_finished_at"],
+            output=row["tool_call_output"],
+            success=None if row["tool_call_success"] is None else bool(row["tool_call_success"]),
+            error=row["tool_call_error"],
+        ),
     )
