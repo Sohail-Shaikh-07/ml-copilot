@@ -249,12 +249,7 @@ class AgentLoop:
 
             assistant_content = "" if tool_calls else (full_content or "")
             assistant_raw = (
-                {
-                    "tool_calls": [
-                        {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
-                        for tc in tool_calls
-                    ]
-                }
+                {"tool_calls": [{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in tool_calls]}
                 if tool_calls
                 else None
             )
@@ -326,8 +321,7 @@ class AgentLoop:
                     continue
 
                 requires_approval = (
-                    self.settings.safety.require_tool_approval
-                    and tool_call.name in APPROVAL_REQUIRED_TOOLS
+                    self.settings.safety.require_tool_approval and tool_call.name in APPROVAL_REQUIRED_TOOLS
                 )
                 if requires_approval:
                     self.repo.add_tool_call(

@@ -168,6 +168,5 @@ async def test_rejecting_pending_approval_resumes_loop_with_tool_feedback(tmp_pa
     assert updated_tool_call.status == "rejected"
     assert tool_invocations == []
     assert any(
-        message["role"] == "tool" and "rejected by user" in message["content"]
-        for message in second_call_messages
+        message["role"] == "tool" and "rejected by user" in message["content"] for message in second_call_messages
     )

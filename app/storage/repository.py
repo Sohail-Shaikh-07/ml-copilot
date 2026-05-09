@@ -527,11 +527,7 @@ class SQLiteRepository:
             session_id=current.session_id,
             turn_id=current.turn_id,
             tool_name=current.tool_name,
-            arguments_json=(
-                json.dumps(arguments, sort_keys=True)
-                if arguments is not None
-                else current.arguments_json
-            ),
+            arguments_json=(json.dumps(arguments, sort_keys=True) if arguments is not None else current.arguments_json),
             status=status if status is not None else current.status,
             requires_approval=current.requires_approval,
             approval_id=approval_id if approval_id is not None else current.approval_id,
@@ -620,11 +616,7 @@ class SQLiteRepository:
             requested_at=requested_at or utc_now(),
             responded_at=responded_at,
             user_feedback=user_feedback,
-            edited_payload_json=(
-                json.dumps(edited_payload, sort_keys=True)
-                if edited_payload is not None
-                else None
-            ),
+            edited_payload_json=(json.dumps(edited_payload, sort_keys=True) if edited_payload is not None else None),
         )
         with connect_sqlite(self.database_path) as connection:
             connection.execute(
