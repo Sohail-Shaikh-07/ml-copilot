@@ -129,7 +129,15 @@ class SQLiteRepository:
         with connect_sqlite(self.database_path) as connection:
             connection.execute(
                 """
-                INSERT INTO sessions (id, title, status, model, metadata_json, created_at, updated_at)
+                INSERT INTO sessions (
+                    id,
+                    title,
+                    status,
+                    model,
+                    metadata_json,
+                    created_at,
+                    updated_at
+                )
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
@@ -241,7 +249,16 @@ class SQLiteRepository:
             connection.execute(
                 """
                 INSERT INTO messages (
-                    id, session_id, turn_id, role, content, tool_call_id, name, raw_json, sequence, created_at
+                    id,
+                    session_id,
+                    turn_id,
+                    role,
+                    content,
+                    tool_call_id,
+                    name,
+                    raw_json,
+                    sequence,
+                    created_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
@@ -266,7 +283,17 @@ class SQLiteRepository:
         with connect_sqlite(self.database_path) as connection:
             rows = connection.execute(
                 """
-                SELECT id, session_id, turn_id, role, content, tool_call_id, name, raw_json, sequence, created_at
+                SELECT
+                    id,
+                    session_id,
+                    turn_id,
+                    role,
+                    content,
+                    tool_call_id,
+                    name,
+                    raw_json,
+                    sequence,
+                    created_at
                 FROM messages
                 WHERE session_id = ?
                 ORDER BY sequence ASC, created_at ASC
@@ -297,7 +324,15 @@ class SQLiteRepository:
         with connect_sqlite(self.database_path) as connection:
             connection.execute(
                 """
-                INSERT INTO events (id, session_id, turn_id, event_type, data_json, sequence, created_at)
+                INSERT INTO events (
+                    id,
+                    session_id,
+                    turn_id,
+                    event_type,
+                    data_json,
+                    sequence,
+                    created_at
+                )
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (

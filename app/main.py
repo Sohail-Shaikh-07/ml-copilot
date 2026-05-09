@@ -72,7 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # Sessions command - list sessions
-    sessions_parser = subparsers.add_parser("sessions", help="List all sessions")
+    _ = subparsers.add_parser("sessions", help="List all sessions")
 
     # Resume command - resume a session
     resume_parser = subparsers.add_parser("resume", help="Resume a session")
@@ -230,9 +230,7 @@ async def cmd_chat(args: argparse.Namespace, settings: AppSettings) -> int:
 
 async def cmd_sessions(args: argparse.Namespace, settings: AppSettings) -> int:
     """Execute the 'sessions' command."""
-    repo = asyncio.run(  # noqa: PTH003 - Using sync repo for simplicity
-        asyncio.to_thread(lambda: _get_sync_repo(settings))
-    )
+    repo = asyncio.run(asyncio.to_thread(lambda: _get_sync_repo(settings)))
     await list_sessions(repo)
     return 0
 
@@ -259,6 +257,7 @@ async def cmd_resume(args: argparse.Namespace, settings: AppSettings) -> int:
 def _get_sync_repo(settings: AppSettings):
     """Get a synchronous repository for simple operations."""
     from app.storage.repository import SQLiteRepository
+
     repo = SQLiteRepository(settings.db_path)
     repo.initialize()
     return repo

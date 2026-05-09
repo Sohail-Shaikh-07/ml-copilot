@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import fnmatch
 import re
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from app.config import AppSettings
 
+IGNORED_PATH_NAMES = {".git", "__pycache__", "node_modules", ".pytest_cache"}
 MAX_READ_LINES = 2000
 MAX_LINE_LENGTH = 4000
 MAX_OUTPUT_LINES = 500
@@ -18,15 +20,23 @@ def _safe_path(path: Path, workspace_root: Path) -> Path | None:
     """Resolve path and ensure it stays within workspace root. Returns None if unsafe."""
     try:
         resolved = path.resolve()
-        # Normalize the path comparison - make sure both are absolute and resolved
         try:
             resolved.relative_to(workspace_root.resolve())
             return resolved
         except ValueError:
-            # Path is outside workspace_root
             return None
     except (OSError, RuntimeError):
         return None
+
+
+def _format_workspace_relative(path: Path, workspace_root: Path) -> str:
+    """Return a workspace-relative display path."""
+    return str(path.relative_to(workspace_root))
+
+
+def _workspace_error(path_value: str, workspace_root: Path) -> str:
+    """Return a consistent workspace boundary error."""
+    return f"Error: Path {path_value!r} is outside workspace root {workspace_root}"
 
 
 def _format_lines(lines: list[str], offset: int = 1) -> list[str]:
@@ -34,12 +44,87 @@ def _format_lines(lines: list[str], offset: int = 1) -> list[str]:
     result = []
     for i, line in enumerate(lines, start=offset):
         if len(line) > MAX_LINE_LENGTH:
-            line = line[:MAX_LINE_LENGTH] + f"... [truncated {len(line) - MAX_LINE_LENGTH} chars]"
+            truncated = len(line) - MAX_LINE_LENGTH
+            line = line[:MAX_LINE_LENGTH] + f"... [truncated {truncated} chars]"
         result.append(f"{i:>6}\t{line}")
     return result
 
 
-# ── Tool Handlers ──────────────────────────────────────────────────────────────
+def _resolve_search_root(
+    path_filter: str | None,
+    workspace_root: Path,
+) -> Path | None:
+    """Resolve the search root inside the workspace."""
+    if not path_filter:
+        return workspace_root
+    return _safe_path(Path(path_filter), workspace_root)
+
+
+def _extension_for(file_type: str | None) -> str | None:
+    """Normalize an optional file-type filter to an extension."""
+    if not file_type:
+        return None
+
+    type_map = {
+        "py": ".py",
+        "python": ".py",
+        "js": ".js",
+        "ts": ".ts",
+        "tsx": ".tsx",
+        "jsx": ".jsx",
+        "md": ".md",
+        "json": ".json",
+        "yaml": ".yaml",
+        "yml": ".yml",
+        "toml": ".toml",
+        "txt": ".txt",
+    }
+    return type_map.get(file_type.lower(), f".{file_type.lower()}")
+
+
+def _should_skip_search_path(path: Path, search_root: Path) -> bool:
+    """Return True when a candidate path should be skipped during search."""
+    relative_parts = path.relative_to(search_root).parts
+    return any(part.startswith(".") or part in IGNORED_PATH_NAMES for part in relative_parts)
+
+
+def _iter_search_files(
+    search_root: Path,
+    extension_filter: str | None,
+) -> Iterator[Path]:
+    """Yield searchable files within the workspace."""
+    for item in search_root.rglob("*"):
+        if not item.is_file():
+            continue
+        if _should_skip_search_path(item, search_root):
+            continue
+        if extension_filter and item.suffix.lower() != extension_filter:
+            continue
+        yield item
+
+
+def _read_search_matches(
+    file_path: Path,
+    regex: re.Pattern[str],
+    workspace_root: Path,
+    remaining: int,
+) -> list[str]:
+    """Collect up to `remaining` matches from a single file."""
+    try:
+        content = file_path.read_text(encoding="utf-8", errors="replace")
+    except (OSError, UnicodeDecodeError):
+        return []
+
+    matches: list[str] = []
+    rel_path = _format_workspace_relative(file_path, workspace_root)
+    for line_num, line in enumerate(content.splitlines(), start=1):
+        if not regex.search(line):
+            continue
+        display_line = line[:200] + ("..." if len(line) > 200 else "")
+        matches.append(f"{rel_path}:{line_num}: {display_line}")
+        if len(matches) >= remaining:
+            break
+    return matches
 
 
 async def list_files_handler(args: dict[str, Any], settings: AppSettings) -> str:
@@ -47,10 +132,9 @@ async def list_files_handler(args: dict[str, Any], settings: AppSettings) -> str
     dir_path = args.get("path", str(settings.paths.workspace_root))
     pattern = args.get("pattern", "*")
 
-    base = Path(dir_path)
-    safe = _safe_path(base, settings.paths.workspace_root)
+    safe = _safe_path(Path(dir_path), settings.paths.workspace_root)
     if safe is None:
-        return f"Error: Path {dir_path!r} is outside workspace root {settings.paths.workspace_root}"
+        return _workspace_error(dir_path, settings.paths.workspace_root)
 
     if not safe.exists():
         return f"Error: Directory does not exist: {dir_path}"
@@ -58,21 +142,17 @@ async def list_files_handler(args: dict[str, Any], settings: AppSettings) -> str
     if not safe.is_dir():
         return f"Error: Not a directory: {dir_path}"
 
-    try:
-        files = sorted(
-            f.name for f in safe.iterdir() if re.match(pattern.replace("*", ".*"), f.name)
-        )
-    except re.error as e:
-        return f"Error: Invalid pattern {pattern!r}: {e}"
+    files = sorted(f.name for f in safe.iterdir() if fnmatch.fnmatch(f.name, pattern))
 
     if not files:
         return f"No files matching {pattern!r} in {dir_path}"
 
-    output_lines = [f"Contents of {safe.relative_to(settings.paths.workspace_root)} ({len(files)} items):"]
-    for f in files[:MAX_OUTPUT_LINES]:
-        full_path = safe / f
+    display_path = _format_workspace_relative(safe, settings.paths.workspace_root)
+    output_lines = [f"Contents of {display_path} ({len(files)} items):"]
+    for name in files[:MAX_OUTPUT_LINES]:
+        full_path = safe / name
         marker = "/" if full_path.is_dir() else ""
-        output_lines.append(f"  {f}{marker}")
+        output_lines.append(f"  {name}{marker}")
     if len(files) > MAX_OUTPUT_LINES:
         output_lines.append(f"  ... and {len(files) - MAX_OUTPUT_LINES} more files")
     return "\n".join(output_lines)
@@ -84,10 +164,9 @@ async def read_file_handler(args: dict[str, Any], settings: AppSettings) -> str:
     if not file_path:
         return "Error: No path provided."
 
-    path = Path(file_path)
-    safe = _safe_path(path, settings.paths.workspace_root)
+    safe = _safe_path(Path(file_path), settings.paths.workspace_root)
     if safe is None:
-        return f"Error: Path {file_path!r} is outside workspace root {settings.paths.workspace_root}"
+        return _workspace_error(file_path, settings.paths.workspace_root)
 
     if not safe.exists():
         return f"Error: File not found: {file_path}"
@@ -97,35 +176,31 @@ async def read_file_handler(args: dict[str, Any], settings: AppSettings) -> str:
 
     try:
         content = safe.read_text(encoding="utf-8")
-    except Exception as e:
-        return f"Error reading file: {e}"
+    except Exception as exc:
+        return f"Error reading file: {exc}"
 
     lines = content.splitlines()
     total_lines = len(lines)
-
-    # Parse offset (1-based) and limit
     offset = max(args.get("offset", 1), 1)
     limit = args.get("limit", MAX_READ_LINES)
 
-    # Adjust for file boundaries
     offset = min(offset, total_lines)
     if offset < 1:
         offset = 1
 
-    # Get the selected lines (offset is 1-based in user API)
     start_idx = offset - 1
     end_idx = min(start_idx + limit, total_lines)
-    selected = lines[start_idx:end_idx]
+    numbered = _format_lines(lines[start_idx:end_idx], offset=offset)
 
-    numbered = _format_lines(selected, offset=offset)
-
-    header = f"--- {safe.relative_to(settings.paths.workspace_root)} ({total_lines} lines total, showing {offset}-{end_idx}) ---"
+    display_path = _format_workspace_relative(safe, settings.paths.workspace_root)
+    header = f"--- {display_path} ({total_lines} lines total, showing {offset}-{end_idx}) ---"
     footer = "--- End of file ---"
 
     if len(numbered) < MAX_OUTPUT_LINES:
         return header + "\n" + "\n".join(numbered) + "\n" + footer
-    else:
-        return header + "\n" + "\n".join(numbered[:MAX_OUTPUT_LINES]) + f"\n... [{len(numbered) - MAX_OUTPUT_LINES} more lines] ...\n" + footer
+
+    omitted = len(numbered) - MAX_OUTPUT_LINES
+    return header + "\n" + "\n".join(numbered[:MAX_OUTPUT_LINES]) + f"\n... [{omitted} more lines] ...\n" + footer
 
 
 async def search_text_handler(args: dict[str, Any], settings: AppSettings) -> str:
@@ -134,89 +209,37 @@ async def search_text_handler(args: dict[str, Any], settings: AppSettings) -> st
     if not pattern:
         return "Error: No pattern provided."
 
-    path_filter = args.get("path", None)
-    file_type = args.get("type", None)
+    path_filter = args.get("path")
+    file_type = args.get("type")
     max_results = args.get("max_results", 100)
 
-    if path_filter:
-        base = Path(path_filter)
-        safe = _safe_path(base, settings.paths.workspace_root)
-        if safe is None:
-            return f"Error: Path {path_filter!r} is outside workspace root"
-    else:
-        safe = settings.paths.workspace_root
+    safe = _resolve_search_root(path_filter, settings.paths.workspace_root)
+    if safe is None:
+        return _workspace_error(path_filter or "", settings.paths.workspace_root)
 
     if not safe.exists():
         return f"Error: Search path does not exist: {path_filter or 'workspace'}"
 
-    # Build file extension filter if provided
-    extension_filter = None
-    if file_type:
-        # Common file type mappings
-        type_map = {
-            "py": ".py",
-            "python": ".py",
-            "js": ".js",
-            "ts": ".ts",
-            "tsx": ".tsx",
-            "jsx": ".jsx",
-            "md": ".md",
-            "json": ".json",
-            "yaml": ".yaml",
-            "yml": ".yml",
-            "toml": ".toml",
-            "txt": ".txt",
-        }
-        extension_filter = type_map.get(file_type.lower(), f".{file_type.lower()}")
-
     try:
         regex = re.compile(pattern)
-    except re.error as e:
-        return f"Error: Invalid regex pattern {pattern!r}: {e}"
+    except re.error as exc:
+        return f"Error: Invalid regex pattern {pattern!r}: {exc}"
 
+    extension_filter = _extension_for(file_type)
     matches: list[str] = []
-    count = 0
 
-    def _search_dir(dir_path: Path) -> None:
-        nonlocal count
-        if count >= max_results:
-            return
-        try:
-            for item in dir_path.iterdir():
-                if count >= max_results:
-                    return
-                # Skip hidden files and common ignore patterns
-                if item.name.startswith("."):
-                    continue
-                if item.name in {".git", "__pycache__", "node_modules", ".pytest_cache"}:
-                    continue
-
-                if item.is_dir():
-                    _search_dir(item)
-                elif item.is_file():
-                    # Apply extension filter if set
-                    if extension_filter and not item.suffix.lower() == extension_filter:
-                        continue
-
-                    try:
-                        # Read file in small chunks to find matches
-                        content = item.read_text(encoding="utf-8", errors="replace")
-                        lines = content.splitlines()
-                        for line_num, line in enumerate(lines, start=1):
-                            if regex.search(line):
-                                rel_path = item.relative_to(settings.paths.workspace_root)
-                                # Truncate long lines
-                                display_line = line[:200] + ("..." if len(line) > 200 else "")
-                                matches.append(f"{rel_path}:{line_num}: {display_line}")
-                                count += 1
-                                if count >= max_results:
-                                    return
-                    except (OSError, UnicodeDecodeError):
-                        continue
-        except PermissionError:
-            pass
-
-    _search_dir(safe)
+    for item in _iter_search_files(safe, extension_filter):
+        remaining = max_results - len(matches)
+        if remaining <= 0:
+            break
+        matches.extend(
+            _read_search_matches(
+                item,
+                regex,
+                settings.paths.workspace_root,
+                remaining,
+            )
+        )
 
     if not matches:
         return f"No matches found for pattern {pattern!r}"
@@ -229,8 +252,7 @@ async def search_text_handler(args: dict[str, Any], settings: AppSettings) -> st
 async def git_status_handler(args: dict[str, Any], settings: AppSettings) -> str:
     """Show git status of the workspace."""
     work_dir = args.get("work_dir", str(settings.paths.workspace_root))
-    base = Path(work_dir)
-    safe = _safe_path(base, settings.paths.workspace_root)
+    safe = _safe_path(Path(work_dir), settings.paths.workspace_root)
     if safe is None:
         return f"Error: Path {work_dir!r} is outside workspace root"
 
@@ -250,18 +272,17 @@ async def git_status_handler(args: dict[str, Any], settings: AppSettings) -> str
         return "Error: Git status command timed out."
     except FileNotFoundError:
         return "Error: Git is not installed or not in PATH."
-    except Exception as e:
-        return f"Error running git status: {e}"
+    except Exception as exc:
+        return f"Error running git status: {exc}"
 
 
 async def git_diff_handler(args: dict[str, Any], settings: AppSettings) -> str:
     """Show git diff of the workspace."""
     work_dir = args.get("work_dir", str(settings.paths.workspace_root))
-    file_path = args.get("path", None)
+    file_path = args.get("path")
     staged = args.get("staged", False)
 
-    base = Path(work_dir)
-    safe = _safe_path(base, settings.paths.workspace_root)
+    safe = _safe_path(Path(work_dir), settings.paths.workspace_root)
     if safe is None:
         return f"Error: Path {work_dir!r} is outside workspace root"
 
@@ -269,12 +290,10 @@ async def git_diff_handler(args: dict[str, Any], settings: AppSettings) -> str:
     if staged:
         cmd.append("--staged")
     if file_path:
-        # Validate the file path is within workspace
         file_full = (safe / file_path).resolve()
         if _safe_path(file_full, settings.paths.workspace_root) is None:
             return f"Error: File path {file_path!r} is outside workspace root"
-        cmd.append("--")
-        cmd.append(file_path)
+        cmd.extend(["--", file_path])
 
     try:
         result = subprocess.run(
@@ -294,11 +313,8 @@ async def git_diff_handler(args: dict[str, Any], settings: AppSettings) -> str:
         return "Error: Git diff command timed out."
     except FileNotFoundError:
         return "Error: Git is not installed or not in PATH."
-    except Exception as e:
-        return f"Error running git diff: {e}"
-
-
-# ── Tool Specifications ──────────────────────────────────────────────────────────
+    except Exception as exc:
+        return f"Error running git diff: {exc}"
 
 
 def get_tool_specs() -> list[dict[str, Any]]:
@@ -306,7 +322,10 @@ def get_tool_specs() -> list[dict[str, Any]]:
     return [
         {
             "name": "list_files",
-            "description": "List files in a directory. Shows files and folders with optional pattern matching. Cannot escape workspace root.",
+            "description": (
+                "List files in a directory. Shows files and folders with "
+                "optional pattern matching. Cannot escape workspace root."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -323,7 +342,10 @@ def get_tool_specs() -> list[dict[str, Any]]:
         },
         {
             "name": "read_file",
-            "description": "Read a file with line numbers. Supports offset and limit for large files. Must read a file before editing it.",
+            "description": (
+                "Read a file with line numbers. Supports offset and limit for "
+                "large files. Must read a file before editing it."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -345,7 +367,10 @@ def get_tool_specs() -> list[dict[str, Any]]:
         },
         {
             "name": "search_text",
-            "description": "Search for a regex pattern in files within the workspace. Returns matching lines with file paths and line numbers.",
+            "description": (
+                "Search for a regex pattern in files within the workspace. "
+                "Returns matching lines with file paths and line numbers."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -371,7 +396,9 @@ def get_tool_specs() -> list[dict[str, Any]]:
         },
         {
             "name": "git_status",
-            "description": "Show the current git status of the workspace, listing all modified, added, and deleted files.",
+            "description": (
+                "Show the current git status of the workspace, listing all modified, added, and deleted files."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -384,7 +411,7 @@ def get_tool_specs() -> list[dict[str, Any]]:
         },
         {
             "name": "git_diff",
-            "description": "Show uncommitted or staged changes. Use staged=true to see staged changes.",
+            "description": ("Show uncommitted or staged changes. Use staged=true to see staged changes."),
             "parameters": {
                 "type": "object",
                 "properties": {

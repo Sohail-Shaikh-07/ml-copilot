@@ -25,8 +25,7 @@ class ToolCall:
             return json.loads(self.arguments or "{}")
         except json.JSONDecodeError as exc:
             raise LLMProtocolError(
-                f"Tool call {self.id or self.name or '<unknown>'}"
-                " returned malformed JSON arguments."
+                f"Tool call {self.id or self.name or '<unknown>'} returned malformed JSON arguments."
             ) from exc
 
 
@@ -281,8 +280,7 @@ class _StreamState:
 
     def to_response(self) -> LLMResponse:
         ordered_tool_calls = [
-            builder.to_tool_call()
-            for _, builder in sorted(self.tool_calls.items(), key=lambda item: item[0])
+            builder.to_tool_call() for _, builder in sorted(self.tool_calls.items(), key=lambda item: item[0])
         ]
         return LLMResponse(
             model=self.model,

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import pytest
-import asyncio
 from pathlib import Path
 
-from app.config import AppSettings, AppPaths
+import pytest
+
+from app.config import AppPaths, AppSettings
 from app.tools import workspace
 
 
@@ -220,6 +220,7 @@ class TestGitStatus:
         """Should show git status for new repo."""
         # Initialize git repo
         import subprocess
+
         subprocess.run(
             ["git", "init"],
             cwd=str(mock_settings.paths.workspace_root),

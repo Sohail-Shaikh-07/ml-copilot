@@ -242,35 +242,32 @@ class AgentLoop:
                 content=assistant_content,
                 sequence=len(ctx.messages),
                 raw=(
-                    {"tool_calls": [
-                        {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
-                        for tc in tool_calls
-                    ]}
-                    if tool_calls else None
+                    {"tool_calls": [{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in tool_calls]}
+                    if tool_calls
+                    else None
                 ),
             )
-            ctx.messages.append({
-                "role": "assistant",
-                "content": assistant_content,
-                **({
-                    "tool_calls": [
-                        {"id": tc.id, "type": tc.type, "function": {
-                            "name": tc.name,
-                            "arguments": tc.arguments
-                        }}
-                        for tc in tool_calls
-                    ]
-                } if tool_calls else {}),
-            })
+            ctx.messages.append(
+                {
+                    "role": "assistant",
+                    "content": assistant_content,
+                    **(
+                        {
+                            "tool_calls": [
+                                {"id": tc.id, "type": tc.type, "function": {"name": tc.name, "arguments": tc.arguments}}
+                                for tc in tool_calls
+                            ]
+                        }
+                        if tool_calls
+                        else {}
+                    ),
+                }
+            )
 
             # If no tool calls, we're done
             if not tool_calls:
-                await self.emit_event(
-                    ctx, EventType.ASSISTANT_MESSAGE, {"content": full_content or ""}
-                )
-                await self.emit_event(
-                    ctx, EventType.TURN_COMPLETE, {"iterations": iterations}
-                )
+                await self.emit_event(ctx, EventType.ASSISTANT_MESSAGE, {"content": full_content or ""})
+                await self.emit_event(ctx, EventType.TURN_COMPLETE, {"iterations": iterations})
                 return {"status": "complete", "content": full_content, "iterations": iterations}
 
             # Process tool calls
@@ -304,10 +301,7 @@ class AgentLoop:
                     tool_result = {
                         "role": "tool",
                         "tool_call_id": tc.id,
-                        "content": (
-                            "Approval required. "
-                            "Tool execution skipped pending user approval."
-                        ),
+                        "content": ("Approval required. Tool execution skipped pending user approval."),
                     }
                     tool_results.append(tool_result)
                     ctx.messages.append(tool_result)
@@ -341,11 +335,7 @@ class AgentLoop:
                 )
 
         # Max iterations reached
-        await self.emit_event(
-            ctx,
-            EventType.TURN_COMPLETE,
-            {"iterations": iterations, "max_reached": True}
-        )
+        await self.emit_event(ctx, EventType.TURN_COMPLETE, {"iterations": iterations, "max_reached": True})
         return {"status": "max_iterations", "iterations": iterations}
 
     def interrupt(self) -> None:
@@ -359,12 +349,14 @@ class AgentLoop:
 def _utc_now() -> str:
     """Return current UTC time as ISO string."""
     from datetime import UTC, datetime
+
     return datetime.now(UTC).isoformat()
 
 
 def _default_system_prompt() -> str:
     """Return the default system prompt for the ML Copilot agent."""
-    return """You are an expert ML engineering assistant specialized in analyzing and improving machine learning codebases.
+    return """You are an expert ML engineering assistant specialized in analyzing
+and improving machine learning codebases.
 
 Your capabilities:
 - Analyze ML repositories and understand their structure

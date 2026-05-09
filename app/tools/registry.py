@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
@@ -59,10 +60,13 @@ class ToolRegistry:
             raise UnknownToolError(f"Tool {name!r} is not registered.")
         return tool
 
-    def list(self) -> list[ToolSpec]:
-        return list(self._tools.values())
+    def list_tools(self) -> builtins.list[ToolSpec]:
+        return builtins.list(self._tools.values())
 
-    def openai_tools(self) -> list[JsonDict]:
+    def list(self):
+        return self.list_tools()
+
+    def openai_tools(self) -> builtins.list[JsonDict]:
         return [tool.to_openai_tool() for tool in self._tools.values()]
 
     async def call(self, name: str, arguments: JsonDict | None = None) -> str:
