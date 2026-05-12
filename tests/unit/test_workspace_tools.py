@@ -233,6 +233,55 @@ class TestGitStatus:
         assert "git status" in result.lower() or "git" in result.lower()
 
 
+class TestApplyPatch:
+    """Tests for apply_patch_handler."""
+
+    @pytest.mark.asyncio
+    async def test_applies_patch_and_reports_changed_files(self, mock_settings):
+        """Should apply a valid patch and list changed files."""
+        (mock_settings.paths.workspace_root / "file1.py").write_text("print('hello')\n")
+        patch = """--- a/file1.py
++++ b/file1.py
+@@ -1 +1 @@
+-print('hello')
++print('patched')
+"""
+
+        result = await workspace.apply_patch_handler({"patch": patch}, mock_settings)
+
+        assert result.startswith("Patch applied successfully.")
+        assert "file1.py" in result
+        assert (mock_settings.paths.workspace_root / "file1.py").read_text() == "print('patched')\n"
+
+    @pytest.mark.asyncio
+    async def test_rejects_patch_paths_outside_workspace(self, mock_settings):
+        """Should reject patches that try to escape the workspace root."""
+        patch = """--- a/../outside.txt
++++ b/../outside.txt
+@@ -0,0 +1 @@
++malicious
+"""
+
+        result = await workspace.apply_patch_handler({"patch": patch}, mock_settings)
+
+        assert result.startswith("Error:")
+        assert "escapes the workspace root" in result
+
+    @pytest.mark.asyncio
+    async def test_rejects_invalid_patch(self, mock_settings):
+        """Should surface git apply validation errors."""
+        patch = """--- a/file1.py
++++ b/file1.py
+@@ -99 +99 @@
+-missing
++replacement
+"""
+
+        result = await workspace.apply_patch_handler({"patch": patch}, mock_settings)
+
+        assert result.startswith("Error: Patch validation failed.")
+
+
 class TestToolSpecs:
     """Tests for tool specifications."""
 
@@ -240,10 +289,10 @@ class TestToolSpecs:
         """Should return valid OpenAI tool specifications."""
         specs = workspace.get_tool_specs()
 
-        assert len(specs) == 5
+        assert len(specs) == 6
 
         tool_names = {s["name"] for s in specs}
-        expected = {"list_files", "read_file", "search_text", "git_status", "git_diff"}
+        expected = {"list_files", "read_file", "search_text", "git_status", "git_diff", "apply_patch"}
         assert tool_names == expected
 
         # Check structure

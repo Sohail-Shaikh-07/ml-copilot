@@ -770,6 +770,7 @@ def _get_workspace_handler(name: str, settings: AppSettings) -> ToolHandler:
         "search_text": lambda args: ws.search_text_handler(args, settings),
         "git_status": lambda args: ws.git_status_handler(args, settings),
         "git_diff": lambda args: ws.git_diff_handler(args, settings),
+        "apply_patch": lambda args: ws.apply_patch_handler(args, settings),
     }
 
     try:
