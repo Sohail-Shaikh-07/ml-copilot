@@ -1,10 +1,11 @@
-"""Read-only workspace tools: list files, read file, search text, git status, git diff."""
+"""Workspace tools for reading, searching, git inspection, and safe patch edits."""
 
 from __future__ import annotations
 
 import fnmatch
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -39,6 +40,18 @@ def _workspace_error(path_value: str, workspace_root: Path) -> str:
     return f"Error: Path {path_value!r} is outside workspace root {workspace_root}"
 
 
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    """Return de-duplicated values while preserving order."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
+
+
 def _format_lines(lines: list[str], offset: int = 1) -> list[str]:
     """Add line numbers to lines."""
     result = []
@@ -58,6 +71,62 @@ def _resolve_search_root(
     if not path_filter:
         return workspace_root
     return _safe_path(Path(path_filter), workspace_root)
+
+
+def _extract_patch_paths(patch_text: str) -> list[str]:
+    """Extract referenced file paths from a unified diff patch."""
+    paths: list[str] = []
+    for line in patch_text.splitlines():
+        if line.startswith("diff --git "):
+            match = re.match(r"^diff --git a/(.+) b/(.+)$", line)
+            if not match:
+                raise ValueError(f"Unsupported diff header: {line}")
+            left_path, right_path = match.groups()
+            if left_path != "/dev/null":
+                paths.append(left_path)
+            if right_path != "/dev/null":
+                paths.append(right_path)
+            continue
+        if line.startswith("--- "):
+            candidate = line[4:].strip()
+            if candidate.startswith("a/"):
+                candidate = candidate[2:]
+            if candidate != "/dev/null":
+                paths.append(candidate)
+            continue
+        if line.startswith("+++ "):
+            candidate = line[4:].strip()
+            if candidate.startswith("b/"):
+                candidate = candidate[2:]
+            if candidate != "/dev/null":
+                paths.append(candidate)
+    return _dedupe_preserve_order(paths)
+
+
+def _validate_patch_targets(
+    patch_paths: list[str],
+    workspace_root: Path,
+) -> list[Path]:
+    """Resolve patch paths and ensure every target stays inside the workspace."""
+    if not patch_paths:
+        raise ValueError("Patch does not reference any files.")
+
+    safe_targets: list[Path] = []
+    for patch_path in patch_paths:
+        candidate = Path(patch_path)
+        if candidate.is_absolute() or ".." in candidate.parts:
+            raise ValueError(f"Patch path {patch_path!r} escapes the workspace root.")
+        safe_target = _safe_path(workspace_root / candidate, workspace_root)
+        if safe_target is None:
+            raise ValueError(f"Patch path {patch_path!r} escapes the workspace root.")
+        safe_targets.append(safe_target)
+    return safe_targets
+
+
+def _format_subprocess_error(prefix: str, result: subprocess.CompletedProcess[str]) -> str:
+    """Return a readable error message for a failed subprocess."""
+    details = result.stderr.strip() or result.stdout.strip() or "Unknown error."
+    return f"Error: {prefix} {details}"
 
 
 def _extension_for(file_type: str | None) -> str | None:
@@ -317,6 +386,66 @@ async def git_diff_handler(args: dict[str, Any], settings: AppSettings) -> str:
         return f"Error running git diff: {exc}"
 
 
+async def apply_patch_handler(args: dict[str, Any], settings: AppSettings) -> str:
+    """Apply an approved unified diff patch within the workspace root."""
+    patch_text = args.get("patch", "")
+    if not isinstance(patch_text, str) or not patch_text.strip():
+        return "Error: No patch provided."
+
+    try:
+        patch_paths = _extract_patch_paths(patch_text)
+        safe_targets = _validate_patch_targets(
+            patch_paths,
+            settings.paths.workspace_root,
+        )
+    except ValueError as exc:
+        return f"Error: {exc}"
+
+    patch_file_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".patch",
+            delete=False,
+            encoding="utf-8",
+        ) as patch_file:
+            patch_file.write(patch_text)
+            patch_file_path = Path(patch_file.name)
+
+        check_result = subprocess.run(
+            ["git", "apply", "--check", "--recount", str(patch_file_path)],
+            cwd=str(settings.paths.workspace_root),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if check_result.returncode != 0:
+            return _format_subprocess_error("Patch validation failed.", check_result)
+
+        apply_result = subprocess.run(
+            ["git", "apply", "--recount", str(patch_file_path)],
+            cwd=str(settings.paths.workspace_root),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if apply_result.returncode != 0:
+            return _format_subprocess_error("Failed to apply patch.", apply_result)
+    except subprocess.TimeoutExpired:
+        return "Error: Patch application timed out."
+    except FileNotFoundError:
+        return "Error: Git is not installed or not in PATH."
+    except Exception as exc:
+        return f"Error applying patch: {exc}"
+    finally:
+        if patch_file_path is not None:
+            patch_file_path.unlink(missing_ok=True)
+
+    changed_files = [_format_workspace_relative(path, settings.paths.workspace_root) for path in safe_targets]
+    file_lines = "\n".join(f"  - {path}" for path in changed_files)
+    return f"Patch applied successfully.\nChanged files:\n{file_lines}"
+
+
 def get_tool_specs() -> list[dict[str, Any]]:
     """Return OpenAI-compatible tool specifications."""
     return [
@@ -428,6 +557,23 @@ def get_tool_specs() -> list[dict[str, Any]]:
                         "description": "Show staged changes instead of unstaged (default: false).",
                     },
                 },
+            },
+        },
+        {
+            "name": "apply_patch",
+            "description": (
+                "Apply a unified diff patch inside the workspace root. "
+                "Use only after reading the target files and getting approval."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "patch": {
+                        "type": "string",
+                        "description": ("Unified diff patch text using workspace-relative paths in the diff headers."),
+                    },
+                },
+                "required": ["patch"],
             },
         },
     ]
