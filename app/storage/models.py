@@ -47,6 +47,42 @@ class EventRecord:
 
 
 @dataclass(frozen=True)
+class ToolCallRecord:
+    id: str
+    session_id: str
+    turn_id: str
+    tool_name: str
+    arguments_json: str
+    status: str
+    requires_approval: bool
+    approval_id: str | None
+    started_at: str | None
+    finished_at: str | None
+    output: str | None
+    success: bool | None
+    error: str | None
+
+
+@dataclass(frozen=True)
+class ApprovalRecord:
+    id: str
+    session_id: str
+    turn_id: str
+    tool_call_id: str
+    status: str
+    requested_at: str
+    responded_at: str | None
+    user_feedback: str | None
+    edited_payload_json: str | None
+
+
+@dataclass(frozen=True)
+class PendingApprovalRecord:
+    approval: ApprovalRecord
+    tool_call: ToolCallRecord
+
+
+@dataclass(frozen=True)
 class SessionHistory:
     session: SessionRecord
     messages: list[MessageRecord]
