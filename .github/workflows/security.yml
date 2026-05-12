@@ -12,6 +12,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
   secrets-scan:
     name: Secret Scanning
@@ -109,9 +113,6 @@ jobs:
   codeql:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
-    permissions:
-      security-events: write
-      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
