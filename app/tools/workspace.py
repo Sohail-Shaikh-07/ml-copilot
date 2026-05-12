@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fnmatch
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -127,6 +128,32 @@ def _format_subprocess_error(prefix: str, result: subprocess.CompletedProcess[st
     """Return a readable error message for a failed subprocess."""
     details = result.stderr.strip() or result.stdout.strip() or "Unknown error."
     return f"Error: {prefix} {details}"
+
+
+def _resolve_git_executable() -> str:
+    """Return an absolute path to the git executable."""
+    git_executable = shutil.which("git")
+    if not git_executable:
+        raise FileNotFoundError("Git executable not found in PATH.")
+    return git_executable
+
+
+def _run_git_command(
+    args: list[str],
+    *,
+    cwd: Path,
+    timeout: int = 30,
+) -> subprocess.CompletedProcess[str]:
+    """Run a git command with a resolved executable inside the workspace."""
+    git_executable = _resolve_git_executable()
+    command = [git_executable, *args]
+    return subprocess.run(  # nosec B603
+        command,
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
 
 
 def _extension_for(file_type: str | None) -> str | None:
@@ -326,13 +353,7 @@ async def git_status_handler(args: dict[str, Any], settings: AppSettings) -> str
         return f"Error: Path {work_dir!r} is outside workspace root"
 
     try:
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=str(safe),
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        result = _run_git_command(["status", "--porcelain"], cwd=safe)
         output = result.stdout.strip()
         if not output:
             return "Git working tree is clean."
@@ -365,13 +386,7 @@ async def git_diff_handler(args: dict[str, Any], settings: AppSettings) -> str:
         cmd.extend(["--", file_path])
 
     try:
-        result = subprocess.run(
-            cmd,
-            cwd=str(safe),
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        result = _run_git_command(cmd[1:], cwd=safe)
         output = result.stdout.strip()
         if not output:
             if staged:
@@ -412,22 +427,16 @@ async def apply_patch_handler(args: dict[str, Any], settings: AppSettings) -> st
             patch_file.write(patch_text)
             patch_file_path = Path(patch_file.name)
 
-        check_result = subprocess.run(
-            ["git", "apply", "--check", "--recount", str(patch_file_path)],
-            cwd=str(settings.paths.workspace_root),
-            capture_output=True,
-            text=True,
-            timeout=30,
+        check_result = _run_git_command(
+            ["apply", "--check", "--recount", str(patch_file_path)],
+            cwd=settings.paths.workspace_root,
         )
         if check_result.returncode != 0:
             return _format_subprocess_error("Patch validation failed.", check_result)
 
-        apply_result = subprocess.run(
-            ["git", "apply", "--recount", str(patch_file_path)],
-            cwd=str(settings.paths.workspace_root),
-            capture_output=True,
-            text=True,
-            timeout=30,
+        apply_result = _run_git_command(
+            ["apply", "--recount", str(patch_file_path)],
+            cwd=settings.paths.workspace_root,
         )
         if apply_result.returncode != 0:
             return _format_subprocess_error("Failed to apply patch.", apply_result)
