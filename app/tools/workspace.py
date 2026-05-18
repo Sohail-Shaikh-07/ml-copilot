@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fnmatch
+import os
 import re
 import shutil
 import subprocess
@@ -16,6 +17,24 @@ IGNORED_PATH_NAMES = {".git", "__pycache__", "node_modules", ".pytest_cache"}
 MAX_READ_LINES = 2000
 MAX_LINE_LENGTH = 4000
 MAX_OUTPUT_LINES = 500
+DEFAULT_COMMAND_TIMEOUT_SECONDS = 120
+MAX_COMMAND_TIMEOUT_SECONDS = 3600
+MAX_COMMAND_OUTPUT_CHARS = 20_000
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07")
+_DANGEROUS_COMMAND_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\brm\s+-[^\n]*\brf\b", re.IGNORECASE), "recursive deletion via rm"),
+    (re.compile(r"\bdel\b[^\n]*\s/[sqf]", re.IGNORECASE), "recursive deletion via del"),
+    (
+        re.compile(r"\bremove-item\b[^\n]*\s-recurse\b", re.IGNORECASE),
+        "recursive deletion via Remove-Item",
+    ),
+    (re.compile(r"\bgit\s+reset\s+--hard\b", re.IGNORECASE), "hard reset of the git worktree"),
+    (re.compile(r"\bgit\s+clean\b[^\n]*\s-f", re.IGNORECASE), "forced git clean"),
+    (re.compile(r"\bmkfs(?:\.[a-z0-9]+)?\b", re.IGNORECASE), "filesystem formatting"),
+    (re.compile(r"\bdiskpart\b", re.IGNORECASE), "disk partitioning"),
+    (re.compile(r"\bdd\s+if=", re.IGNORECASE), "raw disk overwrite via dd"),
+    (re.compile(r"\bformat\s+[a-z]:", re.IGNORECASE), "disk formatting command"),
+)
 
 
 def _safe_path(path: Path, workspace_root: Path) -> Path | None:
@@ -128,6 +147,100 @@ def _format_subprocess_error(prefix: str, result: subprocess.CompletedProcess[st
     """Return a readable error message for a failed subprocess."""
     details = result.stderr.strip() or result.stdout.strip() or "Unknown error."
     return f"Error: {prefix} {details}"
+
+
+def _normalize_timeout(value: Any) -> int:
+    """Return a bounded timeout for command execution."""
+    if value in (None, ""):
+        return DEFAULT_COMMAND_TIMEOUT_SECONDS
+
+    timeout = int(value)
+    timeout = max(timeout, 1)
+    return min(timeout, MAX_COMMAND_TIMEOUT_SECONDS)
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from command output."""
+    return _ANSI_ESCAPE_RE.sub("", text)
+
+
+def _truncate_command_output(output: str) -> str:
+    """Trim oversized command output while keeping the start and end."""
+    if len(output) <= MAX_COMMAND_OUTPUT_CHARS:
+        return output
+
+    head_budget = MAX_COMMAND_OUTPUT_CHARS // 3
+    tail_budget = MAX_COMMAND_OUTPUT_CHARS - head_budget
+    omitted = len(output) - MAX_COMMAND_OUTPUT_CHARS
+    return (
+        output[:head_budget]
+        + (f"\n\n... [{omitted} chars omitted, showing first {head_budget} and last {tail_budget}] ...\n\n")
+        + output[-tail_budget:]
+    )
+
+
+def _resolve_command_shell() -> list[str]:
+    """Return the shell executable and flags used for approved commands."""
+    if os.name == "nt":
+        resolved = os.environ.get("ComSpec") or shutil.which("cmd")
+        if resolved:
+            return [resolved, "/d", "/s", "/c"]
+        raise FileNotFoundError("cmd.exe not found in PATH.")
+
+    for executable in ("bash", "sh"):
+        resolved = shutil.which(executable)
+        if resolved:
+            return [resolved, "-lc"]
+    raise FileNotFoundError("No compatible shell executable found in PATH.")
+
+
+def _prepare_shell_command(command: str) -> str:
+    """Normalize command text for the platform shell."""
+    stripped = command.lstrip()
+    if os.name == "nt" and stripped.startswith('"'):
+        return f"call {command}"
+    return command
+
+
+def _find_dangerous_command_reason(command: str) -> str | None:
+    """Return the matching dangerous-command reason, if any."""
+    for pattern, reason in _DANGEROUS_COMMAND_PATTERNS:
+        if pattern.search(command):
+            return reason
+    return None
+
+
+def _format_command_result(
+    *,
+    command: str,
+    work_dir: Path,
+    workspace_root: Path,
+    timeout: int,
+    stdout: str,
+    stderr: str,
+    exit_code: int | None,
+    timed_out: bool = False,
+) -> str:
+    """Format command execution details for the agent."""
+    cleaned_stdout = _truncate_command_output(_strip_ansi(stdout).strip())
+    cleaned_stderr = _truncate_command_output(_strip_ansi(stderr).strip())
+    output_lines = [
+        f"Command: {command}",
+        f"Working directory: {_format_workspace_relative(work_dir, workspace_root)}",
+        f"Timeout: {timeout}s",
+    ]
+    if exit_code is not None:
+        output_lines.append(f"Exit code: {exit_code}")
+    if timed_out:
+        output_lines.append("Status: timed out")
+
+    if cleaned_stdout:
+        output_lines.extend(["", "Stdout:", cleaned_stdout])
+    if cleaned_stderr:
+        output_lines.extend(["", "Stderr:", cleaned_stderr])
+    if not cleaned_stdout and not cleaned_stderr:
+        output_lines.extend(["", "(no output)"])
+    return "\n".join(output_lines)
 
 
 def _resolve_git_executable() -> str:
@@ -401,6 +514,74 @@ async def git_diff_handler(args: dict[str, Any], settings: AppSettings) -> str:
         return f"Error running git diff: {exc}"
 
 
+async def run_command_handler(args: dict[str, Any], settings: AppSettings) -> str:
+    """Run an approved shell command within the workspace root."""
+    command = args.get("command", "")
+    if not isinstance(command, str) or not command.strip():
+        return "Error: No command provided."
+
+    work_dir = args.get("work_dir", str(settings.paths.workspace_root))
+    safe = _safe_path(Path(work_dir), settings.paths.workspace_root)
+    if safe is None:
+        return f"Error: Path {work_dir!r} is outside workspace root"
+    if not safe.exists():
+        return f"Error: Working directory does not exist: {work_dir}"
+    if not safe.is_dir():
+        return f"Error: Working directory is not a directory: {work_dir}"
+
+    try:
+        timeout = _normalize_timeout(args.get("timeout"))
+    except (TypeError, ValueError):
+        return "Error: timeout must be an integer number of seconds."
+
+    if not settings.safety.allow_destructive_commands:
+        reason = _find_dangerous_command_reason(command)
+        if reason:
+            return (
+                "Error: Command blocked by safety policy. "
+                f"Detected {reason}. Set ML_COPILOT_ALLOW_DESTRUCTIVE_COMMANDS=true "
+                "to override explicitly."
+            )
+
+    try:
+        shell_command = _resolve_command_shell()
+        prepared_command = _prepare_shell_command(command)
+        result = subprocess.run(  # nosec B603
+            [*shell_command, prepared_command],
+            cwd=str(safe),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout if isinstance(exc.stdout, str) else ""
+        stderr = exc.stderr if isinstance(exc.stderr, str) else ""
+        return _format_command_result(
+            command=command,
+            work_dir=safe,
+            workspace_root=settings.paths.workspace_root,
+            timeout=timeout,
+            stdout=stdout,
+            stderr=stderr,
+            exit_code=None,
+            timed_out=True,
+        )
+    except FileNotFoundError as exc:
+        return f"Error: {exc}"
+    except Exception as exc:
+        return f"Error running command: {exc}"
+
+    return _format_command_result(
+        command=command,
+        work_dir=safe,
+        workspace_root=settings.paths.workspace_root,
+        timeout=timeout,
+        stdout=result.stdout,
+        stderr=result.stderr,
+        exit_code=result.returncode,
+    )
+
+
 async def apply_patch_handler(args: dict[str, Any], settings: AppSettings) -> str:
     """Apply an approved unified diff patch within the workspace root."""
     patch_text = args.get("patch", "")
@@ -566,6 +747,34 @@ def get_tool_specs() -> list[dict[str, Any]]:
                         "description": "Show staged changes instead of unstaged (default: false).",
                     },
                 },
+            },
+        },
+        {
+            "name": "run_command",
+            "description": (
+                "Run an approved shell command inside the workspace root with "
+                "timeouts, output limits, and dangerous-command blocking."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "Shell command to execute inside the workspace.",
+                    },
+                    "work_dir": {
+                        "type": "string",
+                        "description": "Working directory for the command (default: workspace root).",
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": (
+                            "Optional timeout in seconds "
+                            f"(default: {DEFAULT_COMMAND_TIMEOUT_SECONDS}, max: {MAX_COMMAND_TIMEOUT_SECONDS})."
+                        ),
+                    },
+                },
+                "required": ["command"],
             },
         },
         {

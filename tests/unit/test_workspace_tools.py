@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from subprocess import CompletedProcess, TimeoutExpired
 
 import pytest
 
@@ -282,6 +283,82 @@ class TestApplyPatch:
         assert result.startswith("Error: Patch validation failed.")
 
 
+class TestRunCommand:
+    """Tests for run_command_handler."""
+
+    @pytest.mark.asyncio
+    async def test_runs_command_and_reports_exit_code(self, mock_settings):
+        """Should run a safe command and include its output."""
+        command = "echo hello from run_command"
+
+        result = await workspace.run_command_handler({"command": command}, mock_settings)
+
+        assert "Command:" in result
+        assert "Exit code: 0" in result
+        assert "hello from run_command" in result
+
+    @pytest.mark.asyncio
+    async def test_rejects_work_dir_outside_workspace(self, mock_settings):
+        """Should reject commands outside the workspace root."""
+        outside = str(mock_settings.paths.workspace_root.parent)
+        result = await workspace.run_command_handler(
+            {"command": "echo hello", "work_dir": outside},
+            mock_settings,
+        )
+
+        assert result.startswith("Error:")
+        assert "outside workspace root" in result
+
+    @pytest.mark.asyncio
+    async def test_blocks_dangerous_commands_by_default(self, mock_settings):
+        """Should block obviously destructive commands."""
+        result = await workspace.run_command_handler(
+            {"command": "rm -rf ."},
+            mock_settings,
+        )
+
+        assert result.startswith("Error: Command blocked by safety policy.")
+        assert "recursive deletion via rm" in result
+
+    @pytest.mark.asyncio
+    async def test_reports_command_timeout(self, mock_settings, monkeypatch):
+        """Should report timed out commands cleanly."""
+
+        def fake_run(*_args, **_kwargs):
+            raise TimeoutExpired(cmd="sleep", timeout=1, output="partial stdout", stderr="partial stderr")
+
+        monkeypatch.setattr(workspace.subprocess, "run", fake_run)
+        command = "sleep 2"
+
+        result = await workspace.run_command_handler(
+            {"command": command, "timeout": 1},
+            mock_settings,
+        )
+
+        assert "Status: timed out" in result
+        assert "Timeout: 1s" in result
+
+    @pytest.mark.asyncio
+    async def test_truncates_large_command_output(self, mock_settings, monkeypatch):
+        """Should truncate oversized command output."""
+
+        def fake_run(*_args, **_kwargs):
+            return CompletedProcess(
+                args=["shell"],
+                returncode=0,
+                stdout="x" * 25000,
+                stderr="",
+            )
+
+        monkeypatch.setattr(workspace.subprocess, "run", fake_run)
+        command = "echo placeholder"
+
+        result = await workspace.run_command_handler({"command": command}, mock_settings)
+
+        assert "chars omitted" in result
+        assert len(result) < 23000
+
+
 class TestToolSpecs:
     """Tests for tool specifications."""
 
@@ -289,10 +366,18 @@ class TestToolSpecs:
         """Should return valid OpenAI tool specifications."""
         specs = workspace.get_tool_specs()
 
-        assert len(specs) == 6
+        assert len(specs) == 7
 
         tool_names = {s["name"] for s in specs}
-        expected = {"list_files", "read_file", "search_text", "git_status", "git_diff", "apply_patch"}
+        expected = {
+            "list_files",
+            "read_file",
+            "search_text",
+            "git_status",
+            "git_diff",
+            "run_command",
+            "apply_patch",
+        }
         assert tool_names == expected
 
         # Check structure
