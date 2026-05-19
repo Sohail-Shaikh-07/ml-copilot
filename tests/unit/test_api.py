@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import threading
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -101,3 +104,114 @@ def test_missing_session_returns_404(tmp_path: Path) -> None:
 
     assert response.status_code == 404
     assert response.json() == {"detail": "Session not found"}
+
+
+def test_event_stream_receives_live_events_for_chat_turn(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+
+    def loop_factory(app_settings: AppSettings, repository: SQLiteRepository):
+        from app.agent.loop import create_agent_loop
+
+        return create_agent_loop(
+            app_settings,
+            repository=repository,
+            llm_client=FakeLLMClient(content="Repository summary ready."),
+        )
+
+    app = create_app(settings, loop_factory=loop_factory)
+    stream_client = TestClient(app)
+    chat_client = TestClient(app)
+
+    created = chat_client.post("/api/session", json={"title": "Streaming Session"})
+    session_id = created.json()["id"]
+
+    captured: dict[str, object] = {}
+
+    def consume_events() -> None:
+        with stream_client.stream("GET", f"/api/events/{session_id}") as response:
+            captured["status_code"] = response.status_code
+            captured["events"] = _parse_sse_events(response.iter_text())
+
+    consumer = threading.Thread(target=consume_events)
+    consumer.start()
+    time.sleep(0.1)
+
+    chat_response = chat_client.post(
+        f"/api/chat/{session_id}",
+        json={"message": "Analyze the repository layout"},
+    )
+
+    consumer.join(timeout=5)
+    assert not consumer.is_alive()
+    assert chat_response.status_code == 200
+    assert captured["status_code"] == 200
+
+    events = captured["events"]
+    assert isinstance(events, list)
+    assert [event["event_type"] for event in events] == [
+        "ready",
+        "processing",
+        "assistant_chunk",
+        "assistant_message",
+        "turn_complete",
+    ]
+    assert [event["sequence"] for event in events] == [0, 1, 2, 3, 4]
+    assert {event["session_id"] for event in events} == {session_id}
+    assert events[-1]["data"] == {"iterations": 1}
+
+
+def test_event_stream_replays_events_after_last_event_id(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+
+    def loop_factory(app_settings: AppSettings, repository: SQLiteRepository):
+        from app.agent.loop import create_agent_loop
+
+        return create_agent_loop(
+            app_settings,
+            repository=repository,
+            llm_client=FakeLLMClient(content="Repository summary ready."),
+        )
+
+    app = create_app(settings, loop_factory=loop_factory)
+    client = TestClient(app)
+
+    created = client.post("/api/session", json={"title": "Replay Session"})
+    session_id = created.json()["id"]
+    client.post(
+        f"/api/chat/{session_id}",
+        json={"message": "Analyze the repository layout"},
+    )
+
+    with client.stream(
+        "GET",
+        f"/api/events/{session_id}",
+        headers={"Last-Event-ID": "1"},
+    ) as response:
+        assert response.status_code == 200
+        events = _parse_sse_events(response.iter_text())
+
+    assert [event["event_type"] for event in events] == [
+        "assistant_chunk",
+        "assistant_message",
+        "turn_complete",
+    ]
+    assert [event["sequence"] for event in events] == [2, 3, 4]
+    assert events[0]["data"]["content"] == "Repository summary ready."
+
+
+def _parse_sse_events(chunks) -> list[dict[str, object]]:
+    buffer = "".join(chunks)
+    events: list[dict[str, object]] = []
+
+    for block in buffer.split("\n\n"):
+        lines = [line for line in block.splitlines() if line and not line.startswith(":")]
+        if not lines:
+            continue
+
+        payload_lines = [line[5:].strip() for line in lines if line.startswith("data:")]
+        if not payload_lines:
+            continue
+
+        events.append(json.loads("\n".join(payload_lines)))
+
+    return events
