@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -353,3 +354,63 @@ async def test_new_user_message_abandons_pending_approvals_before_continuing(tmp
         message["role"] == "tool" and "abandoned because the user continued the conversation" in message["content"]
         for message in latest_messages
     )
+
+
+@pytest.mark.asyncio
+async def test_cancelled_tool_call_is_recorded_as_interrupted(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+    session = repository.create_session(session_id="session-1", title="Cancel Tool", model="gpt-5.4")
+    tool_started = asyncio.Event()
+
+    async def slow_tool_handler(args: dict[str, object]) -> str:
+        tool_started.set()
+        await asyncio.sleep(30)
+        return "should not complete"
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolSpec(
+            name="slow_tool",
+            description="Slow test tool",
+            input_schema={"type": "object"},
+            handler=slow_tool_handler,
+        )
+    )
+    llm = DummyLLM(
+        responses=[
+            LLMResponse(
+                model="gpt-5.4",
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        id="call-1",
+                        name="slow_tool",
+                        arguments="{}",
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+        ]
+    )
+    loop = AgentLoop(
+        llm_client=llm,
+        tool_registry=registry,
+        repository=repository,
+        settings=_settings(tmp_path),
+    )
+
+    task = asyncio.create_task(loop.run_turn(session, "Run the slow tool"))
+    await asyncio.wait_for(tool_started.wait(), timeout=2)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    tool_call = repository.get_tool_call("call-1")
+    event_types = [event.event_type for event in repository.list_events(session.id)]
+
+    assert tool_call is not None
+    assert tool_call.status == "interrupted"
+    assert tool_call.output == "Tool execution interrupted."
+    assert "tool_output" in event_types
+    assert event_types[-1] == "interrupted"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Annotated, Any, Callable
 
@@ -13,10 +14,12 @@ from app.config import AppSettings
 from app.storage.models import MessageRecord, PendingApprovalRecord, SessionRecord, ToolCallRecord
 from app.storage.repository import SQLiteRepository
 
+from .runtime import ActiveTurnManager
 from .schemas import (
     ChatRequest,
     ChatResponse,
     CreateSessionRequest,
+    InterruptResponse,
     MessagePayload,
     PendingApprovalPayload,
     SessionDetail,
@@ -43,6 +46,7 @@ def create_app(
     app.state.repository_factory = repository_factory or _default_repository_factory
     app.state.loop_factory = loop_factory or _default_loop_factory
     app.state.event_stream_manager = SessionEventStreamManager()
+    app.state.active_turn_manager = ActiveTurnManager()
 
     router = APIRouter(prefix="/api", tags=["sessions"])
 
@@ -104,10 +108,18 @@ def create_app(
         loop: LoopDep,
     ) -> ChatResponse:
         session = _get_session_or_404(repo, session_id)
+        active_turn_manager = get_active_turn_manager(request)
+        if not active_turn_manager.register(session_id, loop):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Session already has an active turn",
+            )
+
         repo.update_session(session_id, status="processing")
         session = _get_session_or_404(repo, session_id)
         event_stream_manager = get_event_stream_manager(request)
         loop.add_event_handler(event_stream_manager.publish)
+        current_task = asyncio.current_task()
 
         try:
             result = await loop.run_turn(
@@ -115,10 +127,13 @@ def create_app(
                 user_message=payload.message,
                 system_prompt=payload.system_prompt,
             )
+        except asyncio.CancelledError:
+            result = {"status": "interrupted"}
         except Exception:
             repo.update_session(session_id, status="error")
             raise
         finally:
+            active_turn_manager.unregister(session_id, current_task)
             loop.remove_event_handler(event_stream_manager.publish)
 
         updated_session = repo.update_session(session_id, status=_status_for_turn_result(result["status"]))
@@ -126,6 +141,31 @@ def create_app(
             session=_serialize_session_detail(repo, updated_session),
             result=_serialize_turn_result(result),
             messages=[_serialize_message(message) for message in repo.list_messages(session_id)],
+        )
+
+    @router.post("/interrupt/{session_id}", response_model=InterruptResponse)
+    async def interrupt_session(
+        session_id: str,
+        request: Request,
+        repo: RepositoryDep,
+    ) -> InterruptResponse:
+        session = _get_session_or_404(repo, session_id)
+        active_turn_manager = get_active_turn_manager(request)
+
+        if not active_turn_manager.interrupt(session_id):
+            return InterruptResponse(
+                session_id=session_id,
+                status=session.status,
+                interrupted=False,
+                message="No active turn to interrupt.",
+            )
+
+        repo.update_session(session_id, status="interrupted")
+        return InterruptResponse(
+            session_id=session_id,
+            status="interrupt_requested",
+            interrupted=True,
+            message="Active turn interruption requested.",
         )
 
     app.include_router(router)
@@ -138,6 +178,10 @@ def get_settings(request: Request) -> AppSettings:
 
 def get_event_stream_manager(request: Request) -> SessionEventStreamManager:
     return request.app.state.event_stream_manager
+
+
+def get_active_turn_manager(request: Request) -> ActiveTurnManager:
+    return request.app.state.active_turn_manager
 
 
 def get_repository(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -154,8 +155,12 @@ class AgentLoop:
             role="user",
             content=user_message,
         )
-        await self.emit_event(ctx, EventType.PROCESSING, {})
-        return await self._run_loop(session, ctx)
+        try:
+            await self.emit_event(ctx, EventType.PROCESSING, {})
+            return await self._run_loop(session, ctx)
+        except asyncio.CancelledError:
+            await self.emit_event(ctx, EventType.INTERRUPTED, {"message": "Turn interrupted."})
+            raise
 
     async def resume_pending_approval(
         self,
@@ -205,7 +210,11 @@ class AgentLoop:
                 "resolved_approval_id": approval_id,
             }
 
-        return await self._run_loop(session, ctx)
+        try:
+            return await self._run_loop(session, ctx)
+        except asyncio.CancelledError:
+            await self.emit_event(ctx, EventType.INTERRUPTED, {"message": "Turn interrupted."})
+            raise
 
     def interrupt(self) -> None:
         """Signal the agent to stop after the current operation."""
@@ -423,6 +432,25 @@ class AgentLoop:
             tool_output = await self.tools.call(tool_name, arguments)
             success = True
             error = None
+        except asyncio.CancelledError:
+            tool_output = "Tool execution interrupted."
+            self.repo.update_tool_call(
+                tool_call_id,
+                status="interrupted",
+                arguments=arguments,
+                finished_at=_utc_now(),
+                output=tool_output,
+                success=False,
+                error=tool_output,
+            )
+            await self._record_tool_output(
+                ctx,
+                tool_call_id=tool_call_id,
+                tool_name=tool_name,
+                output=tool_output,
+                success=False,
+            )
+            raise
         except Exception as exc:
             tool_output = f"Tool execution error: {exc}"
             success = False

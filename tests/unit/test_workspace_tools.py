@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from subprocess import CompletedProcess, TimeoutExpired
 
 import pytest
 
@@ -321,14 +320,11 @@ class TestRunCommand:
         assert "recursive deletion via rm" in result
 
     @pytest.mark.asyncio
-    async def test_reports_command_timeout(self, mock_settings, monkeypatch):
+    async def test_reports_command_timeout(self, mock_settings):
         """Should report timed out commands cleanly."""
-
-        def fake_run(*_args, **_kwargs):
-            raise TimeoutExpired(cmd="sleep", timeout=1, output="partial stdout", stderr="partial stderr")
-
-        monkeypatch.setattr(workspace.subprocess, "run", fake_run)
-        command = "sleep 2"
+        script = mock_settings.paths.workspace_root / "timeout_command.py"
+        script.write_text("import time\nprint('partial stdout', flush=True)\ntime.sleep(2)\n")
+        command = f"python {script.name}"
 
         result = await workspace.run_command_handler(
             {"command": command, "timeout": 1},
@@ -339,19 +335,11 @@ class TestRunCommand:
         assert "Timeout: 1s" in result
 
     @pytest.mark.asyncio
-    async def test_truncates_large_command_output(self, mock_settings, monkeypatch):
+    async def test_truncates_large_command_output(self, mock_settings):
         """Should truncate oversized command output."""
-
-        def fake_run(*_args, **_kwargs):
-            return CompletedProcess(
-                args=["shell"],
-                returncode=0,
-                stdout="x" * 25000,
-                stderr="",
-            )
-
-        monkeypatch.setattr(workspace.subprocess, "run", fake_run)
-        command = "echo placeholder"
+        script = mock_settings.paths.workspace_root / "large_output.py"
+        script.write_text("print('x' * 25000)\n")
+        command = f"python {script.name}"
 
         result = await workspace.run_command_handler({"command": command}, mock_settings)
 
