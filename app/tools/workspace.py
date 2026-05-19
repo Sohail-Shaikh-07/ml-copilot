@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import fnmatch
 import os
 import re
@@ -243,6 +245,63 @@ def _format_command_result(
     if not cleaned_stdout and not cleaned_stderr:
         output_lines.extend(["", "(no output)"])
     return "\n".join(output_lines)
+
+
+def _decode_process_output(value: bytes | str | None) -> str:
+    """Decode subprocess pipe output."""
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode(encoding="utf-8", errors="replace")
+    return value
+
+
+async def _stop_process(process: asyncio.subprocess.Process) -> None:
+    """Terminate a child process, escalating to kill if it does not exit."""
+    if process.returncode is not None:
+        return
+
+    process.terminate()
+    try:
+        await asyncio.wait_for(process.wait(), timeout=5)
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.wait()
+
+
+async def _run_shell_command(
+    command_parts: list[str],
+    *,
+    cwd: Path,
+    timeout: int,
+) -> tuple[str, str, int | None, bool]:
+    """Run a shell command asynchronously with timeout and cancellation support."""
+    process = await asyncio.create_subprocess_exec(
+        *command_parts,
+        cwd=str(cwd),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    communicate_task = asyncio.create_task(process.communicate())
+
+    try:
+        done, _pending = await asyncio.wait({communicate_task}, timeout=timeout)
+        timed_out = communicate_task not in done
+        if timed_out:
+            await _stop_process(process)
+        stdout, stderr = await communicate_task
+        return (
+            _decode_process_output(stdout),
+            _decode_process_output(stderr),
+            process.returncode,
+            timed_out,
+        )
+    except asyncio.CancelledError:
+        await _stop_process(process)
+        communicate_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await communicate_task
+        raise
 
 
 def _resolve_git_executable() -> str:
@@ -548,16 +607,19 @@ async def run_command_handler(args: dict[str, Any], settings: AppSettings) -> st
     try:
         shell_command = _resolve_command_shell()
         prepared_command = _prepare_shell_command(command)
-        result = subprocess.run(  # nosec B603
+        stdout, stderr, exit_code, timed_out = await _run_shell_command(
             [*shell_command, prepared_command],
-            cwd=str(safe),
-            capture_output=True,
-            text=True,
+            cwd=safe,
             timeout=timeout,
         )
-    except subprocess.TimeoutExpired as exc:
-        stdout = exc.stdout if isinstance(exc.stdout, str) else ""
-        stderr = exc.stderr if isinstance(exc.stderr, str) else ""
+    except asyncio.CancelledError:
+        raise
+    except FileNotFoundError as exc:
+        return f"Error: {exc}"
+    except Exception as exc:
+        return f"Error running command: {exc}"
+
+    if timed_out:
         return _format_command_result(
             command=command,
             work_dir=safe,
@@ -565,22 +627,18 @@ async def run_command_handler(args: dict[str, Any], settings: AppSettings) -> st
             timeout=timeout,
             stdout=stdout,
             stderr=stderr,
-            exit_code=None,
+            exit_code=exit_code,
             timed_out=True,
         )
-    except FileNotFoundError as exc:
-        return f"Error: {exc}"
-    except Exception as exc:
-        return f"Error running command: {exc}"
 
     return _format_command_result(
         command=command,
         work_dir=safe,
         workspace_root=settings.paths.workspace_root,
         timeout=timeout,
-        stdout=result.stdout,
-        stderr=result.stderr,
-        exit_code=result.returncode,
+        stdout=stdout,
+        stderr=stderr,
+        exit_code=exit_code,
     )
 
 

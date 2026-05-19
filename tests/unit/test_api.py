@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
 import time
@@ -19,6 +20,16 @@ class FakeLLMClient:
 
     async def chat(self, **kwargs) -> LLMResponse:
         return LLMResponse(model="gpt-test", content=self._content)
+
+
+class BlockingLLMClient:
+    def __init__(self) -> None:
+        self.started = threading.Event()
+
+    async def chat(self, **kwargs) -> LLMResponse:
+        self.started.set()
+        await asyncio.sleep(30)
+        return LLMResponse(model="gpt-test", content="Too late.")
 
 
 def _settings(tmp_path: Path) -> AppSettings:
@@ -197,6 +208,75 @@ def test_event_stream_replays_events_after_last_event_id(tmp_path: Path) -> None
     ]
     assert [event["sequence"] for event in events] == [2, 3, 4]
     assert events[0]["data"]["content"] == "Repository summary ready."
+
+
+def test_interrupt_route_reports_idle_session(tmp_path: Path) -> None:
+    app = create_app(_settings(tmp_path))
+    client = TestClient(app)
+
+    created = client.post("/api/session", json={"title": "Idle Session"})
+    session_id = created.json()["id"]
+
+    response = client.post(f"/api/interrupt/{session_id}")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "session_id": session_id,
+        "status": created.json()["status"],
+        "interrupted": False,
+        "message": "No active turn to interrupt.",
+    }
+
+
+def test_interrupt_route_cancels_active_chat_turn_and_preserves_event(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    llm = BlockingLLMClient()
+
+    def loop_factory(app_settings: AppSettings, repository: SQLiteRepository):
+        from app.agent.loop import create_agent_loop
+
+        return create_agent_loop(
+            app_settings,
+            repository=repository,
+            llm_client=llm,
+        )
+
+    app = create_app(settings, loop_factory=loop_factory)
+    chat_client = TestClient(app)
+    interrupt_client = TestClient(app)
+
+    created = interrupt_client.post("/api/session", json={"title": "Interrupt Session"})
+    session_id = created.json()["id"]
+    captured: dict[str, object] = {}
+
+    def run_chat() -> None:
+        captured["response"] = chat_client.post(
+            f"/api/chat/{session_id}",
+            json={"message": "Start a long turn"},
+        )
+
+    worker = threading.Thread(target=run_chat)
+    worker.start()
+
+    assert llm.started.wait(timeout=5)
+    interrupt_response = interrupt_client.post(f"/api/interrupt/{session_id}")
+
+    worker.join(timeout=5)
+    assert not worker.is_alive()
+    assert interrupt_response.status_code == 200
+    assert interrupt_response.json()["interrupted"] is True
+
+    chat_response = captured["response"]
+    assert chat_response.status_code == 200
+    body = chat_response.json()
+    assert body["result"]["status"] == "interrupted"
+    assert body["session"]["status"] == "interrupted"
+
+    with interrupt_client.stream("GET", f"/api/events/{session_id}") as response:
+        events = _parse_sse_events(response.iter_text())
+
+    assert response.status_code == 200
+    assert events[-1]["event_type"] == "interrupted"
 
 
 def _parse_sse_events(chunks) -> list[dict[str, object]]:

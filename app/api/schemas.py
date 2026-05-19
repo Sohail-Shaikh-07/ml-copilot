@@ -85,3 +85,10 @@ class ChatResponse(BaseModel):
     session: SessionDetail
     result: TurnResultPayload
     messages: list[MessagePayload]
+
+
+class InterruptResponse(BaseModel):
+    session_id: str
+    status: str
+    interrupted: bool
+    message: str
