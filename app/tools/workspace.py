@@ -6,7 +6,8 @@ import fnmatch
 import os
 import re
 import shutil
-import subprocess
+# Bandit B404 is expected here because this module exposes reviewed subprocess wrappers.
+import subprocess  # nosec B404
 import tempfile
 from pathlib import Path
 from typing import Any, Iterator
