@@ -6,13 +6,14 @@ import fnmatch
 import os
 import re
 import shutil
-# Bandit B404 is expected here because this module exposes reviewed subprocess wrappers.
 import subprocess  # nosec B404
 import tempfile
 from pathlib import Path
 from typing import Any, Iterator
 
 from app.config import AppSettings
+
+# Bandit B404 is expected here because this module exposes reviewed subprocess wrappers.
 
 IGNORED_PATH_NAMES = {".git", "__pycache__", "node_modules", ".pytest_cache"}
 MAX_READ_LINES = 2000
