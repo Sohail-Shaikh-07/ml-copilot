@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -322,9 +323,14 @@ class TestRunCommand:
     @pytest.mark.asyncio
     async def test_reports_command_timeout(self, mock_settings):
         """Should report timed out commands cleanly."""
-        script = mock_settings.paths.workspace_root / "timeout_command.py"
-        script.write_text("import time\nprint('partial stdout', flush=True)\ntime.sleep(2)\n")
-        command = f"python {script.name}"
+        if os.name == "nt":
+            script = mock_settings.paths.workspace_root / "timeout_command.bat"
+            script.write_text("@echo partial stdout\r\n@ping 127.0.0.1 -n 3 > nul\r\n")
+            command = script.name
+        else:
+            script = mock_settings.paths.workspace_root / "timeout_command.sh"
+            script.write_text("printf 'partial stdout\\n'\nsleep 2\n")
+            command = f"sh {script.name}"
 
         result = await workspace.run_command_handler(
             {"command": command, "timeout": 1},
@@ -337,9 +343,14 @@ class TestRunCommand:
     @pytest.mark.asyncio
     async def test_truncates_large_command_output(self, mock_settings):
         """Should truncate oversized command output."""
-        script = mock_settings.paths.workspace_root / "large_output.py"
-        script.write_text("print('x' * 25000)\n")
-        command = f"python {script.name}"
+        if os.name == "nt":
+            script = mock_settings.paths.workspace_root / "large_output.bat"
+            script.write_text("@powershell -NoProfile -Command \"Write-Output ('x' * 25000)\"\r\n")
+            command = script.name
+        else:
+            script = mock_settings.paths.workspace_root / "large_output.sh"
+            script.write_text("printf '%*s' 25000 '' | tr ' ' x\n")
+            command = f"sh {script.name}"
 
         result = await workspace.run_command_handler({"command": command}, mock_settings)
 
