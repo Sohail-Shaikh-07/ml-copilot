@@ -6,6 +6,7 @@ import json
 from typing import Annotated, Any, Callable
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 
 from app.agent.loop import AgentLoop, create_agent_loop
 from app.config import AppSettings
@@ -23,6 +24,7 @@ from .schemas import (
     ToolCallPayload,
     TurnResultPayload,
 )
+from .streaming import SessionEventStreamManager, create_event_stream_response
 
 RepositoryFactory = Callable[[AppSettings], SQLiteRepository]
 LoopFactory = Callable[[AppSettings, SQLiteRepository], AgentLoop]
@@ -40,6 +42,7 @@ def create_app(
     app.state.settings = resolved_settings
     app.state.repository_factory = repository_factory or _default_repository_factory
     app.state.loop_factory = loop_factory or _default_loop_factory
+    app.state.event_stream_manager = SessionEventStreamManager()
 
     router = APIRouter(prefix="/api", tags=["sessions"])
 
@@ -78,16 +81,33 @@ def create_app(
         _get_session_or_404(repo, session_id)
         return [_serialize_message(message) for message in repo.list_messages(session_id)]
 
+    @router.get("/events/{session_id}")
+    async def stream_session_events(
+        session_id: str,
+        request: Request,
+        repo: RepositoryDep,
+    ) -> StreamingResponse:
+        _get_session_or_404(repo, session_id)
+        return create_event_stream_response(
+            request=request,
+            session_id=session_id,
+            repository=repo,
+            stream_manager=get_event_stream_manager(request),
+        )
+
     @router.post("/chat/{session_id}", response_model=ChatResponse)
     async def chat_session(
         session_id: str,
         payload: ChatRequest,
+        request: Request,
         repo: RepositoryDep,
         loop: LoopDep,
     ) -> ChatResponse:
         session = _get_session_or_404(repo, session_id)
         repo.update_session(session_id, status="processing")
         session = _get_session_or_404(repo, session_id)
+        event_stream_manager = get_event_stream_manager(request)
+        loop.add_event_handler(event_stream_manager.publish)
 
         try:
             result = await loop.run_turn(
@@ -98,6 +118,8 @@ def create_app(
         except Exception:
             repo.update_session(session_id, status="error")
             raise
+        finally:
+            loop.remove_event_handler(event_stream_manager.publish)
 
         updated_session = repo.update_session(session_id, status=_status_for_turn_result(result["status"]))
         return ChatResponse(
@@ -112,6 +134,10 @@ def create_app(
 
 def get_settings(request: Request) -> AppSettings:
     return request.app.state.settings
+
+
+def get_event_stream_manager(request: Request) -> SessionEventStreamManager:
+    return request.app.state.event_stream_manager
 
 
 def get_repository(
