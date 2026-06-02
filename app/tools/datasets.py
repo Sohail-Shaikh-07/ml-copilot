@@ -1,0 +1,406 @@
+"""Dataset inspection tool for local files and Hugging Face datasets."""
+
+from __future__ import annotations
+
+import csv
+import io
+import json
+from pathlib import Path
+from typing import Any
+
+import httpx
+
+from app.config import AppSettings
+from app.tools.workspace import _safe_path
+
+HF_DATASETS_SERVER = "https://datasets-server.huggingface.co"
+MAX_SAMPLE_ROWS = 5
+MAX_VALUE_LEN = 120
+MAX_LOCAL_ROWS_SCAN = 10_000
+
+
+async def inspect_dataset_handler(args: dict[str, Any], settings: AppSettings) -> str:
+    """Tool handler: inspect a local file or HF dataset."""
+    source = args.get("source", "")
+    if not source:
+        return "Error: No source provided. Pass a local file path or HF dataset name (e.g. 'imdb')."
+
+    # Determine if local file or HF dataset
+    if "/" not in source or _looks_like_path(source, settings.paths.workspace_root):
+        return await _inspect_local(source, args, settings)
+    return await _inspect_hf(source, args)
+
+
+def _looks_like_path(source: str, workspace_root: Path) -> bool:
+    """Heuristic: treat as local path if file extension present, starts with ./ or ../, or path exists."""
+    p = Path(source)
+    if p.suffix.lower() in (".csv", ".jsonl", ".json", ".parquet", ".tsv"):
+        return True
+    if source.startswith(("./", "../", ".\\", "..\\")) or source.startswith("/"):
+        return True
+    candidate = workspace_root / source if not p.is_absolute() else p
+    return candidate.exists()
+
+
+# --- Local file inspection ---
+
+
+async def _inspect_local(source: str, args: dict[str, Any], settings: AppSettings) -> str:
+    """Inspect a local CSV, JSONL, or Parquet file."""
+    workspace_root = settings.paths.workspace_root
+    path = Path(source) if Path(source).is_absolute() else workspace_root / source
+    safe = _safe_path(path, workspace_root)
+    if safe is None:
+        return f"Error: Path {source!r} is outside workspace root."
+    if not safe.exists():
+        return f"Error: File not found: {source}"
+    if safe.is_dir():
+        return "Error: Path is a directory. Provide a file path."
+
+    ext = safe.suffix.lower()
+    sample_rows = min(args.get("sample_rows", MAX_SAMPLE_ROWS), MAX_SAMPLE_ROWS)
+
+    if ext == ".csv" or ext == ".tsv":
+        return _inspect_csv(safe, sample_rows, delimiter="\t" if ext == ".tsv" else ",")
+    elif ext in (".jsonl", ".json"):
+        return _inspect_jsonl(safe, sample_rows)
+    elif ext == ".parquet":
+        return _inspect_parquet(safe, sample_rows)
+    else:
+        return f"Error: Unsupported file type '{ext}'. Supported: .csv, .tsv, .jsonl, .json, .parquet"
+
+
+def _inspect_csv(path: Path, sample_rows: int, delimiter: str = ",") -> str:
+    """Inspect a CSV/TSV file."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        return f"Error reading file: {e}"
+
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+    rows: list[list[str]] = []
+    for i, row in enumerate(reader):
+        if i >= MAX_LOCAL_ROWS_SCAN:
+            break
+        rows.append(row)
+
+    if not rows:
+        return "Error: File is empty."
+
+    headers = rows[0]
+    data_rows = rows[1:]
+    total_rows = len(data_rows)
+
+    # Compute missing values per column
+    missing: dict[str, int] = {h: 0 for h in headers}
+    for row in data_rows:
+        for i, h in enumerate(headers):
+            val = row[i] if i < len(row) else ""
+            if val.strip() == "":
+                missing[h] += 1
+
+    sections = [f"## {path.name}", ""]
+    sections.append(
+        f"**Format:** CSV | **Rows:** {total_rows:,} "
+        f"(scanned up to {MAX_LOCAL_ROWS_SCAN:,}) | **Columns:** {len(headers)}"
+    )
+    sections.append("")
+
+    # Schema table
+    sections.append("### Columns")
+    sections.append("| # | Column | Missing |")
+    sections.append("|---|--------|---------|")
+    for i, h in enumerate(headers, 1):
+        m = missing[h]
+        pct = f"{m}/{total_rows} ({100 * m // max(total_rows, 1)}%)" if m > 0 else "0"
+        sections.append(f"| {i} | {h} | {pct} |")
+
+    # Sample rows
+    sections.append("")
+    sections.append("### Sample Rows")
+    for idx, row in enumerate(data_rows[:sample_rows], 1):
+        sections.append(f"**Row {idx}:**")
+        for i, h in enumerate(headers):
+            val = row[i] if i < len(row) else ""
+            if len(val) > MAX_VALUE_LEN:
+                val = val[:MAX_VALUE_LEN] + "..."
+            sections.append(f"- {h}: {val}")
+
+    return "\n".join(sections)
+
+
+def _inspect_jsonl(path: Path, sample_rows: int) -> str:
+    """Inspect a JSONL file."""
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as e:
+        return f"Error reading file: {e}"
+
+    records: list[dict[str, Any]] = []
+    parse_errors = 0
+    for line in lines[:MAX_LOCAL_ROWS_SCAN]:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError:
+            parse_errors += 1
+
+    if not records:
+        return "Error: No valid JSON records found."
+
+    # Infer schema from all scanned records
+    all_keys: dict[str, set[str]] = {}
+    for rec in records:
+        for k, v in rec.items():
+            all_keys.setdefault(k, set()).add(type(v).__name__)
+
+    missing: dict[str, int] = {k: 0 for k in all_keys}
+    for rec in records:
+        for k in all_keys:
+            if k not in rec or rec[k] is None:
+                missing[k] += 1
+
+    total = len(records)
+    sections = [f"## {path.name}", ""]
+    sections.append(
+        f"**Format:** JSONL | **Records:** {total:,} "
+        f"(scanned up to {MAX_LOCAL_ROWS_SCAN:,}) | **Fields:** {len(all_keys)}"
+    )
+    if parse_errors:
+        sections.append(f"**Parse errors:** {parse_errors}")
+    sections.append("")
+
+    sections.append("### Fields")
+    sections.append("| # | Field | Types | Missing |")
+    sections.append("|---|-------|-------|---------|")
+    for i, (k, types) in enumerate(all_keys.items(), 1):
+        m = missing[k]
+        pct = f"{m}/{total} ({100 * m // max(total, 1)}%)" if m > 0 else "0"
+        sections.append(f"| {i} | {k} | {', '.join(sorted(types))} | {pct} |")
+
+    sections.append("")
+    sections.append("### Sample Records")
+    for idx, rec in enumerate(records[:sample_rows], 1):
+        sections.append(f"**Record {idx}:**")
+        for k, v in rec.items():
+            val = str(v)
+            if len(val) > MAX_VALUE_LEN:
+                val = val[:MAX_VALUE_LEN] + "..."
+            sections.append(f"- {k}: {val}")
+
+    return "\n".join(sections)
+
+
+def _inspect_parquet(path: Path, sample_rows: int) -> str:
+    """Inspect a Parquet file (requires pyarrow)."""
+    try:
+        import pyarrow.parquet as pq
+    except ImportError:
+        return "Error: `pyarrow` is not installed. Install it with `pip install pyarrow` to inspect Parquet files."
+
+    try:
+        pf = pq.ParquetFile(str(path))
+    except Exception as e:
+        return f"Error reading Parquet file: {e}"
+
+    metadata = pf.metadata
+    schema = pf.schema_arrow
+    total_rows = metadata.num_rows
+
+    sections = [f"## {path.name}", ""]
+    sections.append(
+        f"**Format:** Parquet | **Rows:** {total_rows:,} | "
+        f"**Columns:** {schema.num_fields} | "
+        f"**Row groups:** {metadata.num_row_groups}"
+    )
+    sections.append("")
+
+    sections.append("### Columns")
+    sections.append("| # | Column | Type |")
+    sections.append("|---|--------|------|")
+    for i, field in enumerate(schema, 1):
+        sections.append(f"| {i} | {field.name} | {field.type} |")
+
+    # Sample rows
+    try:
+        table = pf.read_row_group(0)
+        sample = table.slice(0, sample_rows).to_pydict()
+        sections.append("")
+        sections.append("### Sample Rows")
+        keys = list(sample.keys())
+        for idx in range(min(sample_rows, len(sample[keys[0]]))):
+            sections.append(f"**Row {idx + 1}:**")
+            for k in keys:
+                val = str(sample[k][idx])
+                if len(val) > MAX_VALUE_LEN:
+                    val = val[:MAX_VALUE_LEN] + "..."
+                sections.append(f"- {k}: {val}")
+    except Exception:  # nosec B110
+        pass  # Sample rows are optional; schema is already reported
+
+    return "\n".join(sections)
+
+
+# --- HF dataset inspection ---
+
+
+async def _inspect_hf(source: str, args: dict[str, Any]) -> str:
+    """Inspect a Hugging Face dataset via datasets-server API."""
+    dataset = source
+    config = args.get("config")
+    split = args.get("split")
+    sample_rows = min(args.get("sample_rows", 3), MAX_SAMPLE_ROWS)
+    token = args.get("token")
+
+    headers: dict[str, str] = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    sections = [f"## {dataset} (Hugging Face)", ""]
+
+    async with httpx.AsyncClient(timeout=15, headers=headers) as client:
+        # Check validity and get splits
+        try:
+            valid_resp, splits_resp = await _hf_parallel(
+                client,
+                [
+                    (f"{HF_DATASETS_SERVER}/is-valid", {"dataset": dataset}),
+                    (f"{HF_DATASETS_SERVER}/splits", {"dataset": dataset}),
+                ],
+            )
+        except Exception as e:
+            return f"Error querying HF datasets-server: {e}"
+
+        # Status
+        if valid_resp and valid_resp.get("preview"):
+            sections.append("**Status:** ✓ Valid (preview available)")
+        else:
+            sections.append("**Status:** Dataset may have limited availability")
+        sections.append("")
+
+        # Splits
+        configs = _extract_configs(splits_resp) if splits_resp else []
+        if configs:
+            if not config:
+                config = configs[0]["name"]
+            if not split:
+                split = configs[0]["splits"][0] if configs[0]["splits"] else "train"
+
+            sections.append("### Structure")
+            sections.append("| Config | Splits |")
+            sections.append("|--------|--------|")
+            for cfg in configs[:10]:
+                sections.append(f"| {cfg['name']} | {', '.join(cfg['splits'][:5])} |")
+            sections.append("")
+
+        if not config:
+            config = "default"
+        if not split:
+            split = "train"
+
+        # Schema and sample rows
+        try:
+            info_resp, rows_resp = await _hf_parallel(
+                client,
+                [
+                    (f"{HF_DATASETS_SERVER}/info", {"dataset": dataset, "config": config}),
+                    (f"{HF_DATASETS_SERVER}/first-rows", {"dataset": dataset, "config": config, "split": split}),
+                ],
+            )
+        except Exception:
+            info_resp, rows_resp = None, None
+
+        if info_resp:
+            features = info_resp.get("dataset_info", {}).get("features", {})
+            if features:
+                sections.append("### Schema")
+                sections.append("| Column | Type |")
+                sections.append("|--------|------|")
+                for col, info in features.items():
+                    dtype = info.get("dtype") or info.get("_type", "unknown")
+                    sections.append(f"| {col} | {dtype} |")
+                sections.append("")
+
+        if rows_resp:
+            rows = rows_resp.get("rows", [])[:sample_rows]
+            if rows:
+                sections.append(f"### Sample Rows ({config}/{split})")
+                for idx, row_wrapper in enumerate(rows, 1):
+                    row = row_wrapper.get("row", {})
+                    sections.append(f"**Row {idx}:**")
+                    for k, v in row.items():
+                        val = str(v)
+                        if len(val) > MAX_VALUE_LEN:
+                            val = val[:MAX_VALUE_LEN] + "..."
+                        sections.append(f"- {k}: {val}")
+
+    return "\n".join(sections)
+
+
+async def _hf_parallel(
+    client: httpx.AsyncClient,
+    requests: list[tuple[str, dict[str, str]]],
+) -> list[dict[str, Any] | None]:
+    """Make parallel GET requests, return parsed JSON or None."""
+    import asyncio
+
+    async def _get(url: str, params: dict[str, str]) -> dict[str, Any] | None:
+        try:
+            resp = await client.get(url, params=params)
+            if resp.status_code == 200:
+                return resp.json()
+        except Exception:  # nosec B110
+            pass  # Individual API failures are non-fatal
+        return None
+
+    results = await asyncio.gather(*[_get(url, params) for url, params in requests])
+    return list(results)
+
+
+def _extract_configs(splits_data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Group splits by config from HF splits response."""
+    configs: dict[str, dict[str, Any]] = {}
+    for s in splits_data.get("splits", []):
+        cfg = s.get("config", "default")
+        if cfg not in configs:
+            configs[cfg] = {"name": cfg, "splits": []}
+        configs[cfg]["splits"].append(s.get("split", ""))
+    return list(configs.values())
+
+
+def get_tool_specs() -> list[dict[str, Any]]:
+    """Return OpenAI-compatible tool specifications."""
+    return [
+        {
+            "name": "inspect_dataset",
+            "description": (
+                "Inspect a dataset's metadata, schema, and sample rows. "
+                "Supports local CSV/TSV/JSONL/Parquet files and Hugging Face datasets. "
+                "For local files, pass the file path. For HF datasets, pass the dataset name (e.g. 'imdb')."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "description": "Local file path or HF dataset name (e.g. 'data/train.csv' or 'imdb').",
+                    },
+                    "config": {
+                        "type": "string",
+                        "description": "HF dataset config name (optional, auto-detected).",
+                    },
+                    "split": {
+                        "type": "string",
+                        "description": "HF dataset split (optional, defaults to first available).",
+                    },
+                    "sample_rows": {
+                        "type": "integer",
+                        "description": "Number of sample rows to show (default: 3, max: 5).",
+                    },
+                },
+                "required": ["source"],
+            },
+        },
+    ]
