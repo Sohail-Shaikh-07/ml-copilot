@@ -768,8 +768,8 @@ def create_agent_loop(
 
 
 def _create_tool_registry(settings: AppSettings) -> ToolRegistry:
-    """Create and populate the tool registry with workspace tools."""
-    from app.tools import workspace
+    """Create and populate the tool registry with workspace and reporting tools."""
+    from app.tools import reporting, workspace
 
     registry = ToolRegistry()
     workspace_specs = workspace.get_tool_specs()
@@ -782,6 +782,15 @@ def _create_tool_registry(settings: AppSettings) -> ToolRegistry:
             description=spec["description"],
             input_schema=spec.get("parameters", {"type": "object", "properties": {}}),
             handler=handler,
+        )
+        registry.register(tool_spec)
+
+    for spec in reporting.get_tool_specs():
+        tool_spec = ToolSpec(
+            name=spec["name"],
+            description=spec["description"],
+            input_schema=spec.get("parameters", {"type": "object", "properties": {}}),
+            handler=_make_report_handler(settings),
         )
         registry.register(tool_spec)
 
@@ -806,3 +815,13 @@ def _get_workspace_handler(name: str, settings: AppSettings) -> ToolHandler:
         return handlers[name]
     except KeyError as exc:
         raise UnknownToolError(f"Workspace tool handler is not registered for {name!r}.") from exc
+
+
+def _make_report_handler(settings: AppSettings) -> ToolHandler:
+    """Create a handler for the git_report tool."""
+    from app.tools import reporting
+
+    async def _handler(args: dict[str, Any]) -> str:
+        return await reporting.git_report_handler(args, settings)
+
+    return _handler
