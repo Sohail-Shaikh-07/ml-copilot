@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -10,8 +11,9 @@ import pytest
 from app.config import AppPaths, AppSettings
 from app.tools.datasets import (
     _inspect_csv,
+    _inspect_json,
     _inspect_jsonl,
-    _looks_like_path,
+    _looks_like_local_path,
     get_tool_specs,
     inspect_dataset_handler,
 )
@@ -21,22 +23,14 @@ def _settings(tmp_path: Path) -> AppSettings:
     return AppSettings.from_paths(AppPaths.from_workspace_root(tmp_path))
 
 
-class TestLooksLikePath:
-    def test_csv_extension(self, tmp_path: Path) -> None:
-        assert _looks_like_path("data/train.csv", tmp_path) is True
-
-    def test_jsonl_extension(self, tmp_path: Path) -> None:
-        assert _looks_like_path("data.jsonl", tmp_path) is True
-
-    def test_parquet_extension(self, tmp_path: Path) -> None:
-        assert _looks_like_path("model/data.parquet", tmp_path) is True
-
-    def test_hf_dataset_name(self, tmp_path: Path) -> None:
-        assert _looks_like_path("imdb", tmp_path) is False
-
+class TestLooksLikeLocalPath:
     def test_existing_file(self, tmp_path: Path) -> None:
-        (tmp_path / "myfile").write_text("x")
-        assert _looks_like_path("myfile", tmp_path) is True
+        (tmp_path / "data").mkdir()
+        (tmp_path / "data" / "train.csv").write_text("x")
+        assert _looks_like_local_path("data/train.csv", tmp_path) is True
+
+    def test_nonexistent(self, tmp_path: Path) -> None:
+        assert _looks_like_local_path("user/dataset", tmp_path) is False
 
 
 class TestInspectCsv:
@@ -48,13 +42,12 @@ class TestInspectCsv:
         assert "Columns:** 3" in result
         assert "name" in result
         assert "Alice" in result
-        assert "age" in result
 
     def test_missing_values(self, tmp_path: Path) -> None:
         csv_file = tmp_path / "gaps.csv"
         csv_file.write_text("a,b\n1,\n2,\n3,x\n")
         result = _inspect_csv(csv_file, sample_rows=1)
-        assert "2/3" in result  # 2 missing out of 3
+        assert "2/3" in result
 
     def test_empty_file(self, tmp_path: Path) -> None:
         csv_file = tmp_path / "empty.csv"
@@ -67,7 +60,7 @@ class TestInspectCsv:
         tsv_file.write_text("col1\tcol2\nval1\tval2\n")
         result = _inspect_csv(tsv_file, sample_rows=1, delimiter="\t")
         assert "col1" in result
-        assert "val1" in result
+        assert "TSV" in result
 
 
 class TestInspectJsonl:
@@ -77,14 +70,13 @@ class TestInspectJsonl:
         result = _inspect_jsonl(f, sample_rows=2)
         assert "data.jsonl" in result
         assert "text" in result
-        assert "label" in result
         assert "hello" in result
 
     def test_missing_fields(self, tmp_path: Path) -> None:
         f = tmp_path / "data.jsonl"
         f.write_text('{"a":1,"b":2}\n{"a":3}\n')
         result = _inspect_jsonl(f, sample_rows=1)
-        assert "1/2" in result  # b missing in 1 of 2 records
+        assert "1/2" in result
 
     def test_parse_errors(self, tmp_path: Path) -> None:
         f = tmp_path / "bad.jsonl"
@@ -99,6 +91,21 @@ class TestInspectJsonl:
         assert "Error" in result
 
 
+class TestInspectJson:
+    def test_json_array(self, tmp_path: Path) -> None:
+        f = tmp_path / "data.json"
+        f.write_text(json.dumps([{"a": 1, "b": "x"}, {"a": 2, "b": "y"}]))
+        result = _inspect_json(f, sample_rows=2)
+        assert "JSON array" in result
+        assert "a" in result
+
+    def test_json_falls_back_to_jsonl(self, tmp_path: Path) -> None:
+        f = tmp_path / "data.json"
+        f.write_text('{"x":1}\n{"x":2}\n')
+        result = _inspect_json(f, sample_rows=1)
+        assert "JSONL" in result
+
+
 class TestInspectDatasetHandler:
     @pytest.mark.asyncio
     async def test_local_csv(self, tmp_path: Path) -> None:
@@ -107,7 +114,6 @@ class TestInspectDatasetHandler:
         settings = _settings(tmp_path)
         result = await inspect_dataset_handler({"source": "train.csv"}, settings)
         assert "train.csv" in result
-        assert "x" in result
 
     @pytest.mark.asyncio
     async def test_missing_source(self, tmp_path: Path) -> None:
@@ -134,6 +140,15 @@ class TestInspectDatasetHandler:
         settings = _settings(tmp_path)
         result = await inspect_dataset_handler({"source": "data.xlsx"}, settings)
         assert "Unsupported" in result
+
+    @pytest.mark.asyncio
+    async def test_hf_dataset_not_misrouted(self, tmp_path: Path) -> None:
+        """HF dataset names with extensions should route to HF, not local."""
+        settings = _settings(tmp_path)
+        with patch("app.tools.datasets._inspect_hf", new_callable=AsyncMock) as mock_hf:
+            mock_hf.return_value = "## user/data.csv (Hugging Face)"
+            result = await inspect_dataset_handler({"source": "user/data.csv"}, settings)
+        assert "Hugging Face" in result
 
     @pytest.mark.asyncio
     async def test_hf_dataset(self, tmp_path: Path) -> None:

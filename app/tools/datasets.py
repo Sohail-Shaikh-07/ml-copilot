@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
-import io
 import json
 from pathlib import Path
 from typing import Any
@@ -25,20 +25,20 @@ async def inspect_dataset_handler(args: dict[str, Any], settings: AppSettings) -
     if not source:
         return "Error: No source provided. Pass a local file path or HF dataset name (e.g. 'imdb')."
 
-    # Determine if local file or HF dataset
-    if "/" not in source or _looks_like_path(source, settings.paths.workspace_root):
+    # Route: no slash = always local; relative path prefix = local; otherwise check heuristic
+    if "/" not in source and "\\" not in source:
+        return await _inspect_local(source, args, settings)
+    if source.startswith(("./", "../", ".\\", "..\\", "/")):
+        return await _inspect_local(source, args, settings)
+    # Has a slash — could be HF namespace (user/dataset) or a local subpath
+    if _looks_like_local_path(source, settings.paths.workspace_root):
         return await _inspect_local(source, args, settings)
     return await _inspect_hf(source, args)
 
 
-def _looks_like_path(source: str, workspace_root: Path) -> bool:
-    """Heuristic: treat as local path if file extension present, starts with ./ or ../, or path exists."""
-    p = Path(source)
-    if p.suffix.lower() in (".csv", ".jsonl", ".json", ".parquet", ".tsv"):
-        return True
-    if source.startswith(("./", "../", ".\\", "..\\")) or source.startswith("/"):
-        return True
-    candidate = workspace_root / source if not p.is_absolute() else p
+def _looks_like_local_path(source: str, workspace_root: Path) -> bool:
+    """Return True only if source resolves to an existing workspace file."""
+    candidate = workspace_root / source
     return candidate.exists()
 
 
@@ -60,10 +60,12 @@ async def _inspect_local(source: str, args: dict[str, Any], settings: AppSetting
     ext = safe.suffix.lower()
     sample_rows = min(args.get("sample_rows", MAX_SAMPLE_ROWS), MAX_SAMPLE_ROWS)
 
-    if ext == ".csv" or ext == ".tsv":
+    if ext in (".csv", ".tsv"):
         return _inspect_csv(safe, sample_rows, delimiter="\t" if ext == ".tsv" else ",")
-    elif ext in (".jsonl", ".json"):
+    elif ext == ".jsonl":
         return _inspect_jsonl(safe, sample_rows)
+    elif ext == ".json":
+        return _inspect_json(safe, sample_rows)
     elif ext == ".parquet":
         return _inspect_parquet(safe, sample_rows)
     else:
@@ -71,18 +73,21 @@ async def _inspect_local(source: str, args: dict[str, Any], settings: AppSetting
 
 
 def _inspect_csv(path: Path, sample_rows: int, delimiter: str = ",") -> str:
-    """Inspect a CSV/TSV file."""
+    """Inspect a CSV/TSV file by streaming line-by-line."""
     try:
-        text = path.read_text(encoding="utf-8", errors="replace")
+        f = path.open(encoding="utf-8", errors="replace")
     except OSError as e:
         return f"Error reading file: {e}"
 
-    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
     rows: list[list[str]] = []
-    for i, row in enumerate(reader):
-        if i >= MAX_LOCAL_ROWS_SCAN:
-            break
-        rows.append(row)
+    hit_limit = False
+    with f:
+        reader = csv.reader(f, delimiter=delimiter)
+        for i, row in enumerate(reader):
+            if i >= MAX_LOCAL_ROWS_SCAN:
+                hit_limit = True
+                break
+            rows.append(row)
 
     if not rows:
         return "Error: File is empty."
@@ -99,11 +104,10 @@ def _inspect_csv(path: Path, sample_rows: int, delimiter: str = ",") -> str:
             if val.strip() == "":
                 missing[h] += 1
 
+    fmt_name = "TSV" if delimiter == "\t" else "CSV"
+    row_label = f"{total_rows:,}+" if hit_limit else f"{total_rows:,}"
     sections = [f"## {path.name}", ""]
-    sections.append(
-        f"**Format:** CSV | **Rows:** {total_rows:,} "
-        f"(scanned up to {MAX_LOCAL_ROWS_SCAN:,}) | **Columns:** {len(headers)}"
-    )
+    sections.append(f"**Format:** {fmt_name} | **Rows:** {row_label} | **Columns:** {len(headers)}")
     sections.append("")
 
     # Schema table
@@ -130,27 +134,73 @@ def _inspect_csv(path: Path, sample_rows: int, delimiter: str = ",") -> str:
 
 
 def _inspect_jsonl(path: Path, sample_rows: int) -> str:
-    """Inspect a JSONL file."""
-    try:
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError as e:
-        return f"Error reading file: {e}"
-
+    """Inspect a JSONL file by streaming line-by-line."""
     records: list[dict[str, Any]] = []
     parse_errors = 0
-    for line in lines[:MAX_LOCAL_ROWS_SCAN]:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            records.append(json.loads(line))
-        except json.JSONDecodeError:
-            parse_errors += 1
+    hit_limit = False
+
+    try:
+        with path.open(encoding="utf-8", errors="replace") as f:
+            for i, line in enumerate(f):
+                if i >= MAX_LOCAL_ROWS_SCAN:
+                    hit_limit = True
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(json.loads(line))
+                except json.JSONDecodeError:
+                    parse_errors += 1
+    except OSError as e:
+        return f"Error reading file: {e}"
 
     if not records:
         return "Error: No valid JSON records found."
 
-    # Infer schema from all scanned records
+    return _format_json_records(path.name, "JSONL", records, parse_errors, hit_limit, sample_rows)
+
+
+def _inspect_json(path: Path, sample_rows: int) -> str:
+    """Inspect a .json file — handles both JSON arrays and JSONL."""
+    try:
+        with path.open(encoding="utf-8", errors="replace") as f:
+            first_char = ""
+            for ch in f.read(64):
+                if ch.strip():
+                    first_char = ch
+                    break
+    except OSError as e:
+        return f"Error reading file: {e}"
+
+    # JSON array
+    if first_char == "[":
+        try:
+            with path.open(encoding="utf-8", errors="replace") as f:
+                data = json.load(f)
+            if not isinstance(data, list):
+                return "Error: Expected a JSON array of records."
+            records = [r for r in data[:MAX_LOCAL_ROWS_SCAN] if isinstance(r, dict)]
+            hit_limit = len(data) > MAX_LOCAL_ROWS_SCAN
+            if not records:
+                return "Error: No valid JSON records found."
+            return _format_json_records(path.name, "JSON array", records, 0, hit_limit, sample_rows)
+        except json.JSONDecodeError as e:
+            return f"Error parsing JSON: {e}"
+
+    # Fall back to JSONL
+    return _inspect_jsonl(path, sample_rows)
+
+
+def _format_json_records(
+    filename: str,
+    fmt: str,
+    records: list[dict[str, Any]],
+    parse_errors: int,
+    hit_limit: bool,
+    sample_rows: int,
+) -> str:
+    """Format inspection output for JSON-based records."""
     all_keys: dict[str, set[str]] = {}
     for rec in records:
         for k, v in rec.items():
@@ -163,11 +213,9 @@ def _inspect_jsonl(path: Path, sample_rows: int) -> str:
                 missing[k] += 1
 
     total = len(records)
-    sections = [f"## {path.name}", ""]
-    sections.append(
-        f"**Format:** JSONL | **Records:** {total:,} "
-        f"(scanned up to {MAX_LOCAL_ROWS_SCAN:,}) | **Fields:** {len(all_keys)}"
-    )
+    row_label = f"{total:,}+" if hit_limit else f"{total:,}"
+    sections = [f"## {filename}", ""]
+    sections.append(f"**Format:** {fmt} | **Records:** {row_label} | **Fields:** {len(all_keys)}")
     if parse_errors:
         sections.append(f"**Parse errors:** {parse_errors}")
     sections.append("")
@@ -237,8 +285,8 @@ def _inspect_parquet(path: Path, sample_rows: int) -> str:
                 if len(val) > MAX_VALUE_LEN:
                     val = val[:MAX_VALUE_LEN] + "..."
                 sections.append(f"- {k}: {val}")
-    except Exception:  # nosec B110
-        pass  # Sample rows are optional; schema is already reported
+    except Exception as e:  # nosec B110
+        sections.append(f"\n(Could not read sample rows: {e})")
 
     return "\n".join(sections)
 
@@ -306,7 +354,10 @@ async def _inspect_hf(source: str, args: dict[str, Any]) -> str:
                 client,
                 [
                     (f"{HF_DATASETS_SERVER}/info", {"dataset": dataset, "config": config}),
-                    (f"{HF_DATASETS_SERVER}/first-rows", {"dataset": dataset, "config": config, "split": split}),
+                    (
+                        f"{HF_DATASETS_SERVER}/first-rows",
+                        {"dataset": dataset, "config": config, "split": split},
+                    ),
                 ],
             )
         except Exception:
@@ -344,7 +395,6 @@ async def _hf_parallel(
     requests: list[tuple[str, dict[str, str]]],
 ) -> list[dict[str, Any] | None]:
     """Make parallel GET requests, return parsed JSON or None."""
-    import asyncio
 
     async def _get(url: str, params: dict[str, str]) -> dict[str, Any] | None:
         try:
@@ -385,7 +435,10 @@ def get_tool_specs() -> list[dict[str, Any]]:
                 "properties": {
                     "source": {
                         "type": "string",
-                        "description": "Local file path or HF dataset name (e.g. 'data/train.csv' or 'imdb').",
+                        "description": (
+                            "Local file path or HF dataset name "
+                            "(e.g. 'data/train.csv' or 'imdb' or 'username/dataset')."
+                        ),
                     },
                     "config": {
                         "type": "string",
