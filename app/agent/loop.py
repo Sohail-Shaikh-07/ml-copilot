@@ -768,8 +768,8 @@ def create_agent_loop(
 
 
 def _create_tool_registry(settings: AppSettings) -> ToolRegistry:
-    """Create and populate the tool registry with workspace, reporting, and dataset tools."""
-    from app.tools import datasets, reporting, workspace
+    """Create and populate the tool registry with workspace, reporting, dataset, and docs tools."""
+    from app.tools import datasets, docs, reporting, workspace
 
     registry = ToolRegistry()
     workspace_specs = workspace.get_tool_specs()
@@ -800,6 +800,15 @@ def _create_tool_registry(settings: AppSettings) -> ToolRegistry:
             description=spec["description"],
             input_schema=spec.get("parameters", {"type": "object", "properties": {}}),
             handler=_make_dataset_handler(settings),
+        )
+        registry.register(tool_spec)
+
+    for spec in docs.get_tool_specs():
+        tool_spec = ToolSpec(
+            name=spec["name"],
+            description=spec["description"],
+            input_schema=spec.get("parameters", {"type": "object", "properties": {}}),
+            handler=_make_docs_handler(spec["name"], settings),
         )
         registry.register(tool_spec)
 
@@ -842,5 +851,20 @@ def _make_dataset_handler(settings: AppSettings) -> ToolHandler:
 
     async def _handler(args: dict[str, Any]) -> str:
         return await datasets.inspect_dataset_handler(args, settings)
+
+    return _handler
+
+
+def _make_docs_handler(name: str, settings: AppSettings) -> ToolHandler:
+    """Create a handler for docs tools (search_docs or fetch_doc_page)."""
+    from app.tools import docs
+
+    handlers = {
+        "search_docs": docs.search_docs_handler,
+        "fetch_doc_page": docs.fetch_doc_page_handler,
+    }
+
+    async def _handler(args: dict[str, Any]) -> str:
+        return await handlers[name](args, settings)
 
     return _handler
