@@ -15,9 +15,12 @@ MAX_AUTHOR_COUNT = 10
 MAX_SUMMARY_LEN = 500
 
 
-def _normalize_arxiv_id(value: str) -> str:
+def _normalize_arxiv_id(value: Any) -> str:
     """Normalize raw IDs and paper URLs to an arXiv identifier."""
-    candidate = value.strip()
+    if value is None:
+        return ""
+
+    candidate = str(value).strip()
     if not candidate:
         return ""
 

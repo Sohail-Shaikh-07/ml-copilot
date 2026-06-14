@@ -24,6 +24,7 @@ def _settings(tmp_path: Path) -> AppSettings:
 def test_normalize_arxiv_id_from_urls() -> None:
     assert _normalize_arxiv_id("https://huggingface.co/papers/2305.18290") == "2305.18290"
     assert _normalize_arxiv_id("https://arxiv.org/abs/2305.18290") == "2305.18290"
+    assert _normalize_arxiv_id(None) == ""
 
 
 def test_format_paper_details() -> None:
