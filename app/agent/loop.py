@@ -769,7 +769,7 @@ def create_agent_loop(
 
 def _create_tool_registry(settings: AppSettings) -> ToolRegistry:
     """Create and populate the tool registry with workspace, reporting, dataset, and docs tools."""
-    from app.tools import datasets, docs, reporting, workspace
+    from app.tools import datasets, docs, papers, reporting, workspace
 
     registry = ToolRegistry()
     workspace_specs = workspace.get_tool_specs()
@@ -812,6 +812,15 @@ def _create_tool_registry(settings: AppSettings) -> ToolRegistry:
         )
         registry.register(tool_spec)
 
+    for spec in papers.get_tool_specs():
+        tool_spec = ToolSpec(
+            name=spec["name"],
+            description=spec["description"],
+            input_schema=spec.get("parameters", {"type": "object", "properties": {}}),
+            handler=_make_papers_handler(settings),
+        )
+        registry.register(tool_spec)
+
     return registry
 
 
@@ -851,6 +860,16 @@ def _make_dataset_handler(settings: AppSettings) -> ToolHandler:
 
     async def _handler(args: dict[str, Any]) -> str:
         return await datasets.inspect_dataset_handler(args, settings)
+
+    return _handler
+
+
+def _make_papers_handler(settings: AppSettings) -> ToolHandler:
+    """Create a handler for the paper_details tool."""
+    from app.tools import papers
+
+    async def _handler(args: dict[str, Any]) -> str:
+        return await papers.paper_details_handler(args, settings)
 
     return _handler
 
