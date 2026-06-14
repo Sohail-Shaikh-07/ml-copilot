@@ -75,9 +75,7 @@ def _format_paper_details(paper: dict[str, Any]) -> str:
     if summary:
         lines.append(f"\n## Abstract\n{_truncate(summary, MAX_SUMMARY_LEN)}")
 
-    lines.append(
-        "\n**Next:** Use this metadata before citation graph or paper reading tasks."
-    )
+    lines.append("\n**Next:** Use this metadata before citation graph or paper reading tasks.")
     return "\n".join(lines)
 
 
