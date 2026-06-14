@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from app.agent.llm import LLMResponse, ToolCall
-from app.agent.loop import AgentLoop
+from app.agent.loop import AgentLoop, _create_tool_registry
 from app.config import AppPaths, AppSettings
 from app.storage.repository import SQLiteRepository
 from app.tools.registry import ToolRegistry, ToolSpec
@@ -52,6 +52,12 @@ def _registry(tool_output: str, tool_calls: list[dict[str, object]]) -> ToolRegi
         )
     )
     return registry
+
+
+def test_tool_registry_includes_paper_details(tmp_path: Path) -> None:
+    registry = _create_tool_registry(_settings(tmp_path))
+
+    assert registry.get("paper_details").name == "paper_details"
 
 
 @pytest.mark.asyncio
