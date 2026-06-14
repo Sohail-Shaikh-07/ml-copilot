@@ -58,6 +58,7 @@ def test_tool_registry_includes_paper_details(tmp_path: Path) -> None:
     registry = _create_tool_registry(_settings(tmp_path))
 
     assert registry.get("paper_details").name == "paper_details"
+    assert registry.get("analyze_ml_repo").name == "analyze_ml_repo"
 
 
 @pytest.mark.asyncio

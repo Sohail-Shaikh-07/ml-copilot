@@ -768,8 +768,8 @@ def create_agent_loop(
 
 
 def _create_tool_registry(settings: AppSettings) -> ToolRegistry:
-    """Create and populate the tool registry with workspace, reporting, dataset, and docs tools."""
-    from app.tools import datasets, docs, papers, reporting, workspace
+    """Create and populate the tool registry with workspace, reporting, dataset, docs, paper, and repo tools."""
+    from app.tools import datasets, docs, papers, repo_analyzer, reporting, workspace
 
     registry = ToolRegistry()
     workspace_specs = workspace.get_tool_specs()
@@ -818,6 +818,15 @@ def _create_tool_registry(settings: AppSettings) -> ToolRegistry:
             description=spec["description"],
             input_schema=spec.get("parameters", {"type": "object", "properties": {}}),
             handler=_make_papers_handler(settings),
+        )
+        registry.register(tool_spec)
+
+    for spec in repo_analyzer.get_tool_specs():
+        tool_spec = ToolSpec(
+            name=spec["name"],
+            description=spec["description"],
+            input_schema=spec.get("parameters", {"type": "object", "properties": {}}),
+            handler=_make_repo_analyzer_handler(settings),
         )
         registry.register(tool_spec)
 
@@ -870,6 +879,16 @@ def _make_papers_handler(settings: AppSettings) -> ToolHandler:
 
     async def _handler(args: dict[str, Any]) -> str:
         return await papers.paper_details_handler(args, settings)
+
+    return _handler
+
+
+def _make_repo_analyzer_handler(settings: AppSettings) -> ToolHandler:
+    """Create a handler for the analyze_ml_repo tool."""
+    from app.tools import repo_analyzer
+
+    async def _handler(args: dict[str, Any]) -> str:
+        return await repo_analyzer.analyze_ml_repo_handler(args, settings)
 
     return _handler
 
