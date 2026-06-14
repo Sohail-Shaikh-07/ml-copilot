@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -306,8 +307,11 @@ async def fetch_doc_page_handler(args: dict[str, Any], settings: AppSettings) ->
     if not url:
         return "Error: No URL provided."
 
-    if not url.endswith(".md"):
-        url = f"{url}.md"
+    normalized_url = _normalize_hf_docs_url(url)
+    if normalized_url is None:
+        return "Error: fetch_doc_page only accepts HuggingFace docs URLs under https://huggingface.co/docs/."
+
+    url = normalized_url
 
     try:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
@@ -320,6 +324,20 @@ async def fetch_doc_page_handler(args: dict[str, Any], settings: AppSettings) ->
         return f"Error: Network request failed — {e}"
     except Exception as e:
         return f"Error fetching page: {e}"
+
+
+def _normalize_hf_docs_url(url: str) -> str | None:
+    """Return a normalized HuggingFace docs .md URL, or None if the URL is not allowed."""
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or parsed.netloc != "huggingface.co":
+        return None
+    if not parsed.path.startswith("/docs/"):
+        return None
+
+    normalized = parsed._replace(query="", fragment="").geturl()
+    if not normalized.endswith(".md"):
+        normalized = f"{normalized}.md"
+    return normalized
 
 
 # ---------------------------------------------------------------------------

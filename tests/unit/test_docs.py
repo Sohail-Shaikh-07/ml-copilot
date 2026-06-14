@@ -175,6 +175,11 @@ class TestFetchDocPageHandler:
             call_url = mock_client.get.call_args[0][0]
         assert call_url.endswith(".md")
 
+    @pytest.mark.asyncio
+    async def test_rejects_non_hf_docs_urls(self, tmp_path: Path) -> None:
+        result = await fetch_doc_page_handler({"url": "https://example.com/docs/trl/sft"}, _settings(tmp_path))
+        assert "HuggingFace docs URLs" in result
+
 
 class TestGetToolSpecs:
     def test_returns_two_tools(self) -> None:
