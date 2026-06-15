@@ -16,7 +16,12 @@
     {
       "type": "file_contains",
       "path": "train.py",
-      "value": "argparse"
+      "value": "--epochs"
+    },
+    {
+      "type": "file_contains",
+      "path": "train.py",
+      "value": "--output"
     },
     {
       "type": "file_exists",
