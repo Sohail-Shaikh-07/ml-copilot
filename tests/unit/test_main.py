@@ -8,6 +8,16 @@ def test_build_parser_uses_project_name() -> None:
     assert parser.prog == "ml-copilot"
 
 
+def test_build_parser_accepts_eval_command() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(["eval", "fixtures/basic.json", "--json"])
+
+    assert args.command == "eval"
+    assert str(args.fixture) == "fixtures\\basic.json" or str(args.fixture) == "fixtures/basic.json"
+    assert args.json is True
+
+
 def test_format_layout_includes_expected_directories() -> None:
     output = format_layout(AppSettings.from_paths(AppPaths.default()))
 

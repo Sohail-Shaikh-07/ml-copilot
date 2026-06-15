@@ -83,6 +83,18 @@ class PendingApprovalRecord:
 
 
 @dataclass(frozen=True)
+class EvalRunRecord:
+    id: str
+    task_id: str
+    session_id: str
+    status: str
+    score: float | None
+    started_at: str
+    finished_at: str | None
+    report_json: str
+
+
+@dataclass(frozen=True)
 class SessionHistory:
     session: SessionRecord
     messages: list[MessageRecord]
