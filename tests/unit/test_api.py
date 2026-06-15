@@ -6,9 +6,10 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
-from app.agent.llm import LLMResponse
+from app.agent.llm import LLMResponse, ToolCall
 from app.api import create_app
 from app.config import AppSettings
 from app.storage.repository import SQLiteRepository
@@ -30,6 +31,29 @@ class BlockingLLMClient:
         self.started.set()
         await asyncio.sleep(30)
         return LLMResponse(model="gpt-test", content="Too late.")
+
+
+class ApprovalFlowLLMClient:
+    def __init__(self, *, final_content: str) -> None:
+        self.final_content = final_content
+        self.calls: list[dict[str, object]] = []
+
+    async def chat(self, **kwargs) -> LLMResponse:
+        self.calls.append(kwargs)
+        if len(self.calls) == 1:
+            return LLMResponse(
+                model="gpt-test",
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        id="call-1",
+                        name="run_command",
+                        arguments='{"command":"pytest -q"}',
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+        return LLMResponse(model="gpt-test", content=self.final_content, finish_reason="stop")
 
 
 def _settings(tmp_path: Path) -> AppSettings:
@@ -208,6 +232,143 @@ def test_event_stream_replays_events_after_last_event_id(tmp_path: Path) -> None
     ]
     assert [event["sequence"] for event in events] == [2, 3, 4]
     assert events[0]["data"]["content"] == "Repository summary ready."
+
+
+@pytest.mark.parametrize(
+    ("approved", "user_feedback", "expected_decision", "expected_tool_output"),
+    [
+        (True, "looks good", "approved", "command executed: pytest -q"),
+        (False, "skip it", "rejected", "Tool execution rejected by user. Feedback: skip it"),
+    ],
+)
+def test_approval_flow_replays_terminal_events_after_reconnect(
+    tmp_path: Path,
+    monkeypatch,
+    approved: bool,
+    user_feedback: str,
+    expected_decision: str,
+    expected_tool_output: str,
+) -> None:
+    settings = _settings(tmp_path)
+    repository = SQLiteRepository(settings.db_path)
+    repository.initialize()
+    llm = ApprovalFlowLLMClient(final_content="Command finished.")
+
+    async def run_command_handler(args: dict[str, object], _settings: AppSettings) -> str:
+        return f"command executed: {args['command']}"
+
+    monkeypatch.setattr("app.tools.workspace.run_command_handler", run_command_handler)
+
+    def repository_factory(_: AppSettings) -> SQLiteRepository:
+        return repository
+
+    def loop_factory(app_settings: AppSettings, repo: SQLiteRepository):
+        from app.agent.loop import create_agent_loop
+
+        return create_agent_loop(
+            app_settings,
+            repository=repo,
+            llm_client=llm,
+        )
+
+    app = create_app(
+        settings,
+        repository_factory=repository_factory,
+        loop_factory=loop_factory,
+    )
+    stream_client = TestClient(app)
+    chat_client = TestClient(app)
+
+    created = chat_client.post("/api/session", json={"title": "Approval Replay"})
+    session_id = created.json()["id"]
+    captured: dict[str, object] = {}
+
+    def consume_events() -> None:
+        with stream_client.stream("GET", f"/api/events/{session_id}") as response:
+            captured["status_code"] = response.status_code
+            captured["events"] = _parse_sse_events(response.iter_text())
+
+    consumer = threading.Thread(target=consume_events)
+    consumer.start()
+    time.sleep(0.1)
+
+    chat_response = chat_client.post(
+        f"/api/chat/{session_id}",
+        json={"message": "Please run the command"},
+    )
+
+    consumer.join(timeout=5)
+    assert not consumer.is_alive()
+    assert chat_response.status_code == 200
+    assert captured["status_code"] == 200
+    chat_body = chat_response.json()
+    assert chat_body["result"]["status"] == "approval_required"
+    assert len(chat_body["result"]["approval_ids"]) == 1
+
+    first_events = captured["events"]
+    assert isinstance(first_events, list)
+    assert [event["event_type"] for event in first_events] == [
+        "ready",
+        "processing",
+        "tool_call",
+        "approval_required",
+    ]
+    assert [event["sequence"] for event in first_events] == [0, 1, 2, 3]
+
+    approval_required_sequence = first_events[-1]["sequence"]
+    session = repository.get_session(session_id)
+    assert session is not None
+    pending = repository.list_pending_approvals(session_id)
+    assert len(pending) == 1
+
+    from app.agent.loop import create_agent_loop
+
+    resume_loop = create_agent_loop(
+        settings,
+        repository=repository,
+        llm_client=llm,
+    )
+    resume_result = asyncio.run(
+        resume_loop.resume_pending_approval(
+            session,
+            pending[0].approval.id,
+            approved=approved,
+            user_feedback=user_feedback,
+        )
+    )
+
+    with stream_client.stream(
+        "GET",
+        f"/api/events/{session_id}",
+        headers={"Last-Event-ID": str(approval_required_sequence)},
+    ) as response:
+        replayed_events = _parse_sse_events(response.iter_text())
+
+    assert response.status_code == 200
+    assert resume_result["status"] == "complete"
+    assert [event["event_type"] for event in replayed_events] == [
+        "ready",
+        "processing",
+        "approval_resolved",
+        "tool_output",
+        "assistant_chunk",
+        "assistant_message",
+        "turn_complete",
+    ]
+    assert [event["sequence"] for event in replayed_events] == list(
+        range(approval_required_sequence + 1, approval_required_sequence + 1 + len(replayed_events))
+    )
+    assert replayed_events[2]["data"]["decision"] == expected_decision
+    assert replayed_events[3]["data"]["output"] == expected_tool_output
+    assert replayed_events[-1]["event_type"] == "turn_complete"
+
+    messages = repository.list_messages(session_id)
+    assert [message.role for message in messages] == ["user", "assistant", "tool", "assistant"]
+    assert messages[2].content == expected_tool_output
+    assert repository.list_pending_approvals(session_id) == []
+    assert any(
+        message["role"] == "tool" and message["content"] == expected_tool_output for message in llm.calls[1]["messages"]
+    )
 
 
 def test_interrupt_route_reports_idle_session(tmp_path: Path) -> None:
