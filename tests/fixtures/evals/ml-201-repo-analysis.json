@@ -1,0 +1,39 @@
+{
+  "id": "ml-201-repo-analysis",
+  "name": "Repo analysis",
+  "prompt": "Inspect the repository layout and write analysis.md summarizing the architecture, entrypoints, and next risks.",
+  "workspace_files": [
+    {
+      "path": "README.md",
+      "content": "# Sample repo\n\nThis repo has a small app, tools, and tests layout.\n"
+    },
+    {
+      "path": "app/main.py",
+      "content": "def main() -> None:\n    print('hello')\n"
+    },
+    {
+      "path": "app/tools.py",
+      "content": "def tool() -> str:\n    return 'tool'\n"
+    }
+  ],
+  "checks": [
+    {
+      "type": "file_exists",
+      "path": "analysis.md"
+    },
+    {
+      "type": "file_contains",
+      "path": "analysis.md",
+      "value": "architecture"
+    },
+    {
+      "type": "file_contains",
+      "path": "analysis.md",
+      "value": "entrypoint"
+    }
+  ],
+  "metadata": {
+    "category": "repo-analysis",
+    "phase": "Phase 3"
+  }
+}

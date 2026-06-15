@@ -1,0 +1,39 @@
+{
+  "id": "ml-201-eval-script",
+  "name": "Eval script",
+  "prompt": "Implement evaluate.py to compute accuracy from predictions.json and references.json, then write eval_report.json.",
+  "workspace_files": [
+    {
+      "path": "predictions.json",
+      "content": "[\"yes\", \"no\", \"yes\"]\n"
+    },
+    {
+      "path": "references.json",
+      "content": "[\"yes\", \"yes\", \"yes\"]\n"
+    },
+    {
+      "path": "evaluate.py",
+      "content": "import json\nfrom pathlib import Path\n\n\ndef main() -> None:\n    predictions = json.loads(Path('predictions.json').read_text(encoding='utf-8'))\n    references = json.loads(Path('references.json').read_text(encoding='utf-8'))\n    print(len(predictions), len(references))\n\n\nif __name__ == '__main__':\n    main()\n"
+    }
+  ],
+  "checks": [
+    {
+      "type": "file_contains",
+      "path": "evaluate.py",
+      "value": "accuracy"
+    },
+    {
+      "type": "file_exists",
+      "path": "eval_report.json"
+    },
+    {
+      "type": "file_contains",
+      "path": "eval_report.json",
+      "value": "accuracy"
+    }
+  ],
+  "metadata": {
+    "category": "eval-script",
+    "phase": "Phase 3"
+  }
+}

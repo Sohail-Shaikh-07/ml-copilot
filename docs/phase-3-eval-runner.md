@@ -85,3 +85,13 @@ Each run writes:
 - `artifacts/<eval-run-id>/report.md` for reviewer-friendly results
 
 The same report payload is persisted in SQLite under `eval_runs.report_json`.
+
+## Bundled Fixtures
+
+The first seeded eval fixtures live under `tests/fixtures/evals/`:
+
+- `ml-201-training-script-fix.json`
+- `ml-201-dataset-validation.json`
+- `ml-201-eval-script.json`
+- `ml-201-model-card-inference.json`
+- `ml-201-repo-analysis.json`

@@ -1,0 +1,35 @@
+{
+  "id": "ml-201-training-script-fix",
+  "name": "Training script fix",
+  "prompt": "Fix train.py so it parses --epochs and --output, then writes a training_report.md file summarizing the run.",
+  "workspace_files": [
+    {
+      "path": "train.py",
+      "content": "import sys\n\n\ndef main():\n    epochs = int(sys.argv[1])\n    output = sys.argv[2]\n    print(f'Training for {epochs} epochs')\n    print(f'Writing results to {output}')\n\n\nif __name__ == '__main__':\n    main()\n"
+    },
+    {
+      "path": "README.md",
+      "content": "# Training task\n\nThe script should accept `--epochs` and `--output`.\n"
+    }
+  ],
+  "checks": [
+    {
+      "type": "file_contains",
+      "path": "train.py",
+      "value": "argparse"
+    },
+    {
+      "type": "file_exists",
+      "path": "training_report.md"
+    },
+    {
+      "type": "file_contains",
+      "path": "training_report.md",
+      "value": "epochs"
+    }
+  ],
+  "metadata": {
+    "category": "training-script-fix",
+    "phase": "Phase 3"
+  }
+}

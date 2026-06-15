@@ -1,0 +1,35 @@
+{
+  "id": "ml-201-dataset-validation",
+  "name": "Dataset validation",
+  "prompt": "Inspect data/train.csv, validate row count and missing values, then write dataset_report.md with a concise summary.",
+  "workspace_files": [
+    {
+      "path": "data/train.csv",
+      "content": "feature_a,feature_b,label\n1,2,yes\n3,,no\n5,6,yes\n"
+    },
+    {
+      "path": "validate_dataset.py",
+      "content": "from pathlib import Path\n\n\ndef main() -> None:\n    data_path = Path('data/train.csv')\n    print(f'Validating {data_path}')\n\n\nif __name__ == '__main__':\n    main()\n"
+    }
+  ],
+  "checks": [
+    {
+      "type": "file_exists",
+      "path": "dataset_report.md"
+    },
+    {
+      "type": "file_contains",
+      "path": "dataset_report.md",
+      "value": "rows"
+    },
+    {
+      "type": "file_contains",
+      "path": "dataset_report.md",
+      "value": "missing"
+    }
+  ],
+  "metadata": {
+    "category": "dataset-validation",
+    "phase": "Phase 3"
+  }
+}
