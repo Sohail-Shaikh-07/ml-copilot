@@ -197,6 +197,38 @@ def test_tool_call_and_approval_lifecycle(tmp_path: Path) -> None:
     assert repository.list_pending_approvals("session-1") == []
 
 
+def test_eval_run_lifecycle(tmp_path: Path) -> None:
+    repository = SQLiteRepository(tmp_path / "ml-copilot.db")
+    repository.initialize()
+    repository.create_session(
+        session_id="session-1",
+        title="Eval",
+        model="gpt-5.4",
+    )
+
+    created = repository.create_eval_run(
+        eval_run_id="eval-1",
+        task_id="fixture-1",
+        session_id="session-1",
+        report={"status": "running"},
+    )
+    updated = repository.update_eval_run(
+        "eval-1",
+        status="passed",
+        score=1.0,
+        finished_at="2026-06-15T00:00:00+00:00",
+        report={"status": "passed", "score": 1.0},
+    )
+
+    assert created.status == "running"
+    assert updated.status == "passed"
+    assert updated.score == 1.0
+    assert updated.report_json == '{"score": 1.0, "status": "passed"}'
+    assert repository.get_eval_run("eval-1") == updated
+    assert repository.list_eval_runs("fixture-1") == [updated]
+    assert repository.list_eval_runs("missing") == []
+
+
 def test_next_sequences_advance_with_history(tmp_path: Path) -> None:
     repository = SQLiteRepository(tmp_path / "ml-copilot.db")
     repository.initialize()

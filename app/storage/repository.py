@@ -10,6 +10,7 @@ from pathlib import Path
 from app.db import connect_sqlite
 from app.storage.models import (
     ApprovalRecord,
+    EvalRunRecord,
     EventRecord,
     MessageRecord,
     PendingApprovalRecord,
@@ -761,6 +762,129 @@ class SQLiteRepository:
             rows = connection.execute(query, params).fetchall()
         return [_pending_approval_from_row(row) for row in rows]
 
+    def create_eval_run(
+        self,
+        *,
+        task_id: str,
+        session_id: str,
+        status: str = "running",
+        score: float | None = None,
+        report: dict | None = None,
+        eval_run_id: str | None = None,
+    ) -> EvalRunRecord:
+        record = EvalRunRecord(
+            id=eval_run_id or str(uuid.uuid4()),
+            task_id=task_id,
+            session_id=session_id,
+            status=status,
+            score=score,
+            started_at=utc_now(),
+            finished_at=None,
+            report_json=json.dumps(report or {}, sort_keys=True),
+        )
+        with connect_sqlite(self.database_path) as connection:
+            connection.execute(
+                """
+                INSERT INTO eval_runs (
+                    id,
+                    task_id,
+                    session_id,
+                    status,
+                    score,
+                    started_at,
+                    finished_at,
+                    report_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.id,
+                    record.task_id,
+                    record.session_id,
+                    record.status,
+                    record.score,
+                    record.started_at,
+                    record.finished_at,
+                    record.report_json,
+                ),
+            )
+            self._touch_session(connection, session_id)
+            connection.commit()
+        return record
+
+    def get_eval_run(self, eval_run_id: str) -> EvalRunRecord | None:
+        with connect_sqlite(self.database_path) as connection:
+            row = connection.execute(
+                """
+                SELECT id, task_id, session_id, status, score, started_at, finished_at, report_json
+                FROM eval_runs
+                WHERE id = ?
+                """,
+                (eval_run_id,),
+            ).fetchone()
+        return _eval_run_from_row(row) if row else None
+
+    def update_eval_run(
+        self,
+        eval_run_id: str,
+        *,
+        status: str | None = None,
+        score: float | None = None,
+        finished_at: str | None = None,
+        report: dict | None = None,
+    ) -> EvalRunRecord:
+        current = self.get_eval_run(eval_run_id)
+        if current is None:
+            raise KeyError(f"Unknown eval run: {eval_run_id}")
+
+        record = EvalRunRecord(
+            id=current.id,
+            task_id=current.task_id,
+            session_id=current.session_id,
+            status=status if status is not None else current.status,
+            score=score if score is not None else current.score,
+            started_at=current.started_at,
+            finished_at=finished_at if finished_at is not None else current.finished_at,
+            report_json=json.dumps(report, sort_keys=True) if report is not None else current.report_json,
+        )
+        with connect_sqlite(self.database_path) as connection:
+            connection.execute(
+                """
+                UPDATE eval_runs
+                SET
+                    status = ?,
+                    score = ?,
+                    finished_at = ?,
+                    report_json = ?
+                WHERE id = ?
+                """,
+                (
+                    record.status,
+                    record.score,
+                    record.finished_at,
+                    record.report_json,
+                    record.id,
+                ),
+            )
+            self._touch_session(connection, record.session_id)
+            connection.commit()
+        return record
+
+    def list_eval_runs(self, task_id: str | None = None) -> list[EvalRunRecord]:
+        query = """
+            SELECT id, task_id, session_id, status, score, started_at, finished_at, report_json
+            FROM eval_runs
+        """
+        params: tuple[str, ...] = ()
+        if task_id is not None:
+            query += " WHERE task_id = ?"
+            params = (task_id,)
+        query += " ORDER BY started_at ASC, id ASC"
+
+        with connect_sqlite(self.database_path) as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [_eval_run_from_row(row) for row in rows]
+
     def get_session_history(self, session_id: str) -> SessionHistory:
         session = self.get_session(session_id)
         if session is None:
@@ -892,4 +1016,17 @@ def _pending_approval_from_row(row: sqlite3.Row) -> PendingApprovalRecord:
             success=None if row["tool_call_success"] is None else bool(row["tool_call_success"]),
             error=row["tool_call_error"],
         ),
+    )
+
+
+def _eval_run_from_row(row: sqlite3.Row) -> EvalRunRecord:
+    return EvalRunRecord(
+        id=row["id"],
+        task_id=row["task_id"],
+        session_id=row["session_id"],
+        status=row["status"],
+        score=row["score"],
+        started_at=row["started_at"],
+        finished_at=row["finished_at"],
+        report_json=row["report_json"],
     )

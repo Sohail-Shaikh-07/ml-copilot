@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 import logging
+from pathlib import Path
 
 from app.agent.loop import create_agent_loop
 from app.config import AppSettings
@@ -126,6 +127,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--feedback",
         type=str,
         help="Optional feedback to persist with the rejection",
+    )
+
+    eval_parser = subparsers.add_parser("eval", help="Run a fixture-based evaluation")
+    eval_parser.add_argument(
+        "fixture",
+        type=Path,
+        help="Path to an eval fixture JSON file",
+    )
+    eval_parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Directory for eval workspaces and artifacts (default: .ml-copilot/evals)",
+    )
+    eval_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the persisted eval report JSON instead of a short summary",
     )
 
     return parser
@@ -368,6 +386,27 @@ async def cmd_reject(args: argparse.Namespace, settings: AppSettings) -> int:
     return 0
 
 
+async def cmd_eval(args: argparse.Namespace, settings: AppSettings) -> int:
+    """Execute the 'eval' command."""
+    from app.evals import EvalRunner, load_fixture
+
+    fixture = load_fixture(args.fixture)
+    runner = EvalRunner(settings)
+    result = await runner.run_fixture(fixture, output_dir=args.output_dir)
+
+    if args.json:
+        print(result.record.report_json)
+    else:
+        print(f"Eval run: {result.record.id}")
+        print(f"Fixture: {result.record.task_id}")
+        print(f"Status: {result.record.status}")
+        print(f"Score: {result.record.score}")
+        print(f"Workspace: {result.workspace_path}")
+        print(f"Report: {result.markdown_path}")
+
+    return 0 if result.record.status == "passed" else 1
+
+
 def _get_sync_repo(settings: AppSettings):
     """Get a synchronous repository for simple operations."""
     from app.storage.repository import SQLiteRepository
@@ -410,6 +449,8 @@ def main() -> int:
             return asyncio.run(cmd_approve(args, settings))
         elif args.command == "reject":
             return asyncio.run(cmd_reject(args, settings))
+        elif args.command == "eval":
+            return asyncio.run(cmd_eval(args, settings))
         else:
             parser.print_help()
             return 0
