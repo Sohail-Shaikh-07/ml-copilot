@@ -16,6 +16,7 @@ The current client is intentionally narrow and provider-neutral:
 - tool-call parsing for full responses and streamed deltas
 - timeout handling through the configured HTTP client
 - usage parsing when the provider returns token counts
+- provider routing through the internal `LLMClient` interface
 
 ## Why This Shape
 
@@ -25,7 +26,7 @@ That gives later work a single client surface for:
 - the agent runtime
 - tests with mocked transports
 - OpenAI-compatible providers and gateways
-- future native provider adapters
+- native provider adapters behind the same interface
 
 ## Deferred To Later Tasks
 

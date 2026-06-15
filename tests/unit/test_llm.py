@@ -379,3 +379,118 @@ def test_client_streaming_chat_aggregates_sse_chunks() -> None:
         "content_delta",
         "tool_call_delta",
     ]
+
+
+def test_client_anthropic_adapter_uses_native_messages_shape() -> None:
+    recorded = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        recorded["path"] = request.url.path
+        recorded["headers"] = {
+            "x-api-key": request.headers.get("x-api-key"),
+            "anthropic-version": request.headers.get("anthropic-version"),
+        }
+        recorded["payload"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(
+            200,
+            json={
+                "id": "msg_123",
+                "model": "claude-test",
+                "stop_reason": "end_turn",
+                "content": [{"type": "text", "text": "done"}],
+                "usage": {"input_tokens": 4, "output_tokens": 6},
+            },
+        )
+
+    client = LLMClient(
+        base_url="https://example.invalid/v1",
+        api_key="anthropic-key",
+        default_model="claude-test",
+        provider="anthropic",
+        http_client=httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url="https://example.invalid/v1",
+        ),
+    )
+
+    response = run(
+        client.chat(
+            messages=[{"role": "system", "content": "Be concise."}, {"role": "user", "content": "hello"}],
+            stream=True,
+        )
+    )
+
+    assert recorded["path"] == "/v1/messages"
+    assert recorded["headers"]["x-api-key"] == "anthropic-key"
+    assert recorded["headers"]["anthropic-version"] == "2023-06-01"
+    assert recorded["payload"]["system"] == "Be concise."
+    assert recorded["payload"]["messages"] == [{"role": "user", "content": "hello"}]
+    assert response.content == "done"
+    assert response.finish_reason == "end_turn"
+    assert response.usage is not None
+    assert response.usage.total_tokens == 10
+
+
+def test_client_gemini_adapter_parses_function_calls() -> None:
+    recorded = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        recorded["path"] = request.url.path
+        recorded["params"] = dict(request.url.params)
+        recorded["payload"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(
+            200,
+            json={
+                "id": "gemini_resp_123",
+                "model": "gemini-test",
+                "candidates": [
+                    {
+                        "finishReason": "STOP",
+                        "content": {
+                            "parts": [
+                                {"text": "working"},
+                                {
+                                    "functionCall": {
+                                        "id": "call_1",
+                                        "name": "read_file",
+                                        "args": {"path": "README.md"},
+                                    }
+                                },
+                            ]
+                        },
+                    }
+                ],
+                "usageMetadata": {
+                    "promptTokenCount": 8,
+                    "candidatesTokenCount": 5,
+                    "totalTokenCount": 13,
+                },
+            },
+        )
+
+    client = LLMClient(
+        base_url="https://example.invalid/v1beta",
+        api_key="gemini-key",
+        default_model="gemini-test",
+        provider="gemini",
+        http_client=httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url="https://example.invalid/v1beta",
+        ),
+    )
+
+    response = run(
+        client.chat(
+            messages=[{"role": "user", "content": "hello"}],
+            stream=True,
+        )
+    )
+
+    assert recorded["path"] == "/v1beta/models/gemini-test:generateContent"
+    assert recorded["params"]["key"] == "gemini-key"
+    assert recorded["payload"]["contents"] == [{"role": "user", "parts": [{"text": "hello"}]}]
+    assert response.content == "working"
+    assert response.tool_calls[0].name == "read_file"
+    assert response.tool_calls[0].arguments == '{"path":"README.md"}'
+    assert response.usage is not None
+    assert response.usage.total_tokens == 13

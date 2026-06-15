@@ -35,6 +35,7 @@ class AppPaths:
 
 @dataclass(frozen=True)
 class LLMSettings:
+    provider: str
     base_url: str
     api_key: str | None
     model: str
@@ -64,6 +65,7 @@ class AppSettings:
             version="0.1.0",
             paths=paths,
             llm=LLMSettings(
+                provider="openai_compatible",
                 base_url="https://api.openai.com/v1",
                 api_key=None,
                 model="gpt-5.4",
@@ -84,6 +86,7 @@ class AppSettings:
         env_file: Path | None = None,
     ) -> "AppSettings":
         merged_env = load_environment(environ=environ, env_file=env_file)
+        provider = normalize_llm_provider(merged_env.get("LLM_PROVIDER"))
         workspace_root = Path(merged_env.get("ML_COPILOT_WORKSPACE_ROOT", str(AppPaths.default().workspace_root)))
         paths = AppPaths.from_workspace_root(workspace_root)
 
@@ -101,7 +104,8 @@ class AppSettings:
             version="0.1.0",
             paths=paths,
             llm=LLMSettings(
-                base_url=merged_env.get("LLM_BASE_URL", "https://api.openai.com/v1"),
+                provider=provider,
+                base_url=merged_env.get("LLM_BASE_URL", default_llm_base_url(provider)),
                 api_key=blank_to_none(merged_env.get("LLM_API_KEY")),
                 model=merged_env.get("LLM_MODEL", "gpt-5.4"),
                 timeout_seconds=parse_int(
@@ -203,3 +207,32 @@ def strip_optional_quotes(value: str) -> str:
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
         return value[1:-1]
     return value
+
+
+def normalize_llm_provider(value: str | None) -> str:
+    normalized = (value or "openai_compatible").strip().lower().replace("-", "_")
+    if normalized in {"openai", "openai_compatible", "compatible"}:
+        return "openai_compatible"
+    if normalized in {"anthropic", "claude"}:
+        return "anthropic"
+    if normalized in {"gemini", "google_gemini", "google"}:
+        return "gemini"
+    if normalized in {"xai", "grok"}:
+        return "xai"
+    if normalized == "minimax":
+        return "minimax"
+    if normalized == "kimi":
+        return "kimi"
+    if normalized in {"zai", "z_ai", "z"}:
+        return "zai"
+    raise ValueError(f"Unsupported LLM provider: {value!r}")
+
+
+def default_llm_base_url(provider: str) -> str:
+    if provider == "anthropic":
+        return "https://api.anthropic.com/v1"
+    if provider == "gemini":
+        return "https://generativelanguage.googleapis.com/v1beta"
+    if provider == "xai":
+        return "https://api.x.ai/v1"
+    return "https://api.openai.com/v1"

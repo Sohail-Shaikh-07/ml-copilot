@@ -10,6 +10,7 @@ This document captures the configuration slice for `ML Copilot`.
 
 The current configuration layer supports:
 
+- `LLM_PROVIDER`
 - `LLM_BASE_URL`
 - `LLM_API_KEY`
 - `LLM_MODEL`
@@ -46,10 +47,11 @@ development, tests, and CI.
 
 ## Provider Strategy
 
-For the MVP, `ML Copilot` should stay provider-agnostic through an
-OpenAI-compatible interface:
+For the MVP, `ML Copilot` should stay provider-agnostic through a stable
+internal client interface:
 
 - one internal request shape
+- one `provider`
 - one `base_url`
 - one `api_key`
 - one `model`
@@ -68,10 +70,10 @@ gateway or routing layer in front of them.
 
 For providers with native APIs that are not cleanly OpenAI-compatible, the next
 step should be an adapter layer rather than hardwiring provider logic all over
-the app. A later design can introduce a dedicated provider field such as:
+the app. That adapter layer now starts with a dedicated provider field:
 
 ```text
-LLM_PROVIDER=openai_compatible | anthropic | gemini
+LLM_PROVIDER=openai_compatible | anthropic | gemini | xai | minimax | kimi | zai
 ```
 
 Then the runtime can route through small provider clients behind one internal
