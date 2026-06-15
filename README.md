@@ -150,6 +150,12 @@ Planning notes and local reference material live outside this repo in the parent
 
 That keeps the Git repository clean while still letting AI tooling use the surrounding workspace for context.
 
+## Workflow Notes
+
+- [Issue and PR workflow guidance](docs/phase-2-issue-pr-workflow.md)
+- Keep GitHub issue and PR titles aligned with the task ID and task name.
+- Keep issue labels, PR labels, and assignees in sync for each certified task.
+
 ## Planned Stack
 
 - Python 3.12
