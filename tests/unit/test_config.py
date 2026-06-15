@@ -20,6 +20,7 @@ def test_settings_wrap_default_paths() -> None:
     assert settings.app_name == "ML Copilot"
     assert settings.version == "0.1.0"
     assert settings.paths.workspace_root.name == "ml-copilot"
+    assert settings.llm.provider == "openai_compatible"
     assert settings.llm.base_url == "https://api.openai.com/v1"
     assert settings.safety.require_tool_approval is True
 
@@ -28,6 +29,7 @@ def test_load_uses_env_values_and_defaults(tmp_path: Path) -> None:
     settings = AppSettings.load(
         environ={
             "LLM_API_KEY": "secret-key",
+            "LLM_PROVIDER": "anthropic",
             "LLM_MODEL": "gpt-test",
             "ML_COPILOT_WORKSPACE_ROOT": str(tmp_path),
             "ML_COPILOT_REQUIRE_TOOL_APPROVAL": "false",
@@ -36,7 +38,8 @@ def test_load_uses_env_values_and_defaults(tmp_path: Path) -> None:
         }
     )
 
-    assert settings.llm.base_url == "https://api.openai.com/v1"
+    assert settings.llm.provider == "anthropic"
+    assert settings.llm.base_url == "https://api.anthropic.com/v1"
     assert settings.llm.api_key == "secret-key"
     assert settings.llm.model == "gpt-test"
     assert settings.paths.workspace_root == tmp_path.resolve()
