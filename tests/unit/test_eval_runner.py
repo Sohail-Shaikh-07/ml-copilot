@@ -121,6 +121,29 @@ async def test_eval_runner_records_agent_errors(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_eval_runner_sanitizes_agent_output_for_reports(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    fixture = fixture_from_dict({"id": "fixture-json-safe", "prompt": "ok", "checks": []})
+
+    async def fake_agent(
+        _fixture: EvalFixture,
+        workspace_path: Path,
+        _settings: AppSettings,
+        _session: SessionRecord,
+    ) -> dict[str, object]:
+        return {"content": "ok", "path": workspace_path}
+
+    result = await EvalRunner(settings, agent_runner=fake_agent).run_fixture(
+        fixture,
+        output_dir=tmp_path / "eval-output",
+    )
+    report = json.loads(result.record.report_json)
+
+    assert result.record.status == "passed"
+    assert report["agent_output"]["path"] == str(result.workspace_path)
+
+
+@pytest.mark.asyncio
 async def test_runner_records_workspace_escape_as_error(tmp_path: Path) -> None:
     fixture_path = tmp_path / "fixture.json"
     fixture_path.write_text(

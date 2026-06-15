@@ -280,7 +280,7 @@ def build_report(
         "finished_at": finished_at,
         "workspace_path": str(workspace_path),
         "artifact_dir": str(artifact_dir),
-        "agent_output": agent_output,
+        "agent_output": _json_safe(agent_output),
         "checks": [
             {
                 "type": result.kind,
@@ -385,3 +385,15 @@ def _optional_str(value: Any) -> str | None:
 def _safe_slug(value: str) -> str:
     slug = "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in value.strip())
     return slug.strip("-") or "fixture"
+
+
+def _json_safe(value: Any) -> Any:
+    try:
+        json.dumps(value)
+    except TypeError:
+        if isinstance(value, dict):
+            return {str(key): _json_safe(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [_json_safe(item) for item in value]
+        return str(value)
+    return value
