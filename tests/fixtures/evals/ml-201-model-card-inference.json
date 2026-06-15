@@ -1,0 +1,32 @@
+{
+  "id": "ml-201-model-card-inference",
+  "name": "Model card inference",
+  "prompt": "Add an inference section to model_card.md describing how to call the model and include a short safety note.",
+  "workspace_files": [
+    {
+      "path": "model_card.md",
+      "content": "# Model Card\n\n## Overview\nA small text classifier.\n\n## Training\nTrained on a toy dataset.\n"
+    }
+  ],
+  "checks": [
+    {
+      "type": "file_contains",
+      "path": "model_card.md",
+      "value": "## Inference"
+    },
+    {
+      "type": "file_contains",
+      "path": "model_card.md",
+      "value": "Safety"
+    },
+    {
+      "type": "file_contains",
+      "path": "model_card.md",
+      "value": "model"
+    }
+  ],
+  "metadata": {
+    "category": "model-card-inference",
+    "phase": "Phase 3"
+  }
+}
