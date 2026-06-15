@@ -556,7 +556,7 @@ class LLMClient:
             tools=tools,
             tool_choice=tool_choice,
             stream=stream,
-            model=model,
+            model=model or self.default_model,
             temperature=temperature,
             max_tokens=max_tokens,
         )
