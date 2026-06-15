@@ -313,6 +313,7 @@ def test_approval_flow_replays_terminal_events_after_reconnect(
         "tool_call",
         "approval_required",
     ]
+    assert [event["sequence"] for event in first_events] == [0, 1, 2, 3]
 
     approval_required_sequence = first_events[-1]["sequence"]
     session = repository.get_session(session_id)
@@ -354,6 +355,9 @@ def test_approval_flow_replays_terminal_events_after_reconnect(
         "assistant_message",
         "turn_complete",
     ]
+    assert [event["sequence"] for event in replayed_events] == list(
+        range(approval_required_sequence + 1, approval_required_sequence + 1 + len(replayed_events))
+    )
     assert replayed_events[2]["data"]["decision"] == expected_decision
     assert replayed_events[3]["data"]["output"] == expected_tool_output
     assert replayed_events[-1]["event_type"] == "turn_complete"
@@ -361,6 +365,7 @@ def test_approval_flow_replays_terminal_events_after_reconnect(
     messages = repository.list_messages(session_id)
     assert [message.role for message in messages] == ["user", "assistant", "tool", "assistant"]
     assert messages[2].content == expected_tool_output
+    assert repository.list_pending_approvals(session_id) == []
     assert any(
         message["role"] == "tool" and message["content"] == expected_tool_output for message in llm.calls[1]["messages"]
     )
