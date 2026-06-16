@@ -33,6 +33,8 @@ Important runtime paths and safety flags:
 - `ML_COPILOT_REQUIRE_TOOL_APPROVAL`
 - `ML_COPILOT_ALLOW_DESTRUCTIVE_COMMANDS`
 - `ML_COPILOT_REDACT_SECRETS`
+- `ML_COPILOT_ENABLE_MCP`
+- `ML_COPILOT_MCP_MANIFEST_PATH`
 
 Confirm the resolved configuration without printing secrets:
 
@@ -82,9 +84,41 @@ The current safety model is intentionally conservative:
 - approval decisions and edited arguments are persisted
 - tool call arguments and outputs are recorded for review
 - configuration output redacts secrets
+- MCP-style tools are disabled by default and are approval-gated when loaded from a manifest
 - local `.env`, `.ml-copilot`, virtualenvs, and frontend build artifacts are excluded from Docker build context
 
 Keep `ML_COPILOT_REQUIRE_TOOL_APPROVAL=true` for normal use. Only set `ML_COPILOT_ALLOW_DESTRUCTIVE_COMMANDS=true` in a disposable workspace where destructive file or shell operations are expected.
+
+## Optional MCP Discovery
+
+MCP support is currently a discovery contract, not live remote execution. Set `ML_COPILOT_ENABLE_MCP=true` and point `ML_COPILOT_MCP_MANIFEST_PATH` at a local JSON manifest to expose MCP-style tool descriptors to the agent. Discovered tools are namespaced as `mcp__<server>__<tool>`, marked with source `mcp`, and require approval before execution.
+
+Supported manifest shape:
+
+```json
+{
+  "servers": [
+    {
+      "name": "research",
+      "tools": [
+        {
+          "name": "search_papers",
+          "description": "Search paper metadata.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "query": {"type": "string"}
+            },
+            "required": ["query"]
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+In this release, MCP tool execution returns a safe placeholder message. A future transport layer can replace that handler without changing the registry shape.
 
 ## Eval Guidance
 

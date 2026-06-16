@@ -32,6 +32,7 @@ The current release candidate is intentionally narrow:
 - Docker image for local deployment review
 - a small set of trustworthy tools
 - ML-specific helpers for repository, dataset, docs, paper, and reporting workflows
+- optional MCP-style tool discovery from a local manifest, disabled by default
 
 ## Architecture
 
@@ -153,6 +154,7 @@ Planning notes, local reference material, and personal workflow documents should
 - [Issue and PR workflow guidance](docs/phase-2-issue-pr-workflow.md)
 - [Release readiness guide](docs/release-readiness.md)
 - [Eval runner guide](docs/phase-3-eval-runner.md)
+- [MCP support guide](docs/phase-3-mcp-support.md)
 - Keep GitHub issue and PR titles aligned with the task ID and task name.
 - Keep issue labels, PR labels, and assignees in sync for each certified task.
 
@@ -257,6 +259,7 @@ ML Copilot is designed for inspectable local automation, not silent autonomous c
 - risky workspace actions can require explicit approval
 - destructive commands are disabled by default
 - secrets are redacted in user-facing configuration output
+- MCP-style tools are disabled by default and approval-gated when explicitly loaded
 - session history, tool calls, approvals, events, and usage metrics are persisted for review
 
 See [release readiness](docs/release-readiness.md) for the current limitations and release checklist.

@@ -25,6 +25,8 @@ def test_settings_wrap_default_paths() -> None:
     assert settings.safety.require_tool_approval is True
     assert settings.usage.prompt_cost_per_1k_tokens_usd == 0.0015
     assert settings.usage.completion_cost_per_1k_tokens_usd == 0.006
+    assert settings.mcp.enabled is False
+    assert settings.mcp.manifest_path is None
 
 
 def test_load_uses_env_values_and_defaults(tmp_path: Path) -> None:
@@ -37,6 +39,8 @@ def test_load_uses_env_values_and_defaults(tmp_path: Path) -> None:
             "ML_COPILOT_REQUIRE_TOOL_APPROVAL": "false",
             "ML_COPILOT_ALLOW_DESTRUCTIVE_COMMANDS": "true",
             "ML_COPILOT_REDACT_SECRETS": "false",
+            "ML_COPILOT_ENABLE_MCP": "true",
+            "ML_COPILOT_MCP_MANIFEST_PATH": "mcp-tools.json",
             "LLM_PROMPT_COST_PER_1K_TOKENS_USD": "0.01",
             "LLM_COMPLETION_COST_PER_1K_TOKENS_USD": "0.02",
         }
@@ -53,6 +57,8 @@ def test_load_uses_env_values_and_defaults(tmp_path: Path) -> None:
     assert settings.safety.redact_secrets is False
     assert settings.usage.prompt_cost_per_1k_tokens_usd == 0.01
     assert settings.usage.completion_cost_per_1k_tokens_usd == 0.02
+    assert settings.mcp.enabled is True
+    assert settings.mcp.manifest_path == (tmp_path / "mcp-tools.json").resolve()
 
 
 def test_environment_prefers_process_env_over_env_file(tmp_path: Path) -> None:

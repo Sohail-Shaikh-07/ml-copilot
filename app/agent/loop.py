@@ -429,9 +429,7 @@ class AgentLoop:
                     )
                     continue
 
-                requires_approval = (
-                    self.settings.safety.require_tool_approval and tool_call.name in APPROVAL_REQUIRED_TOOLS
-                )
+                requires_approval = self._tool_requires_approval(tool_call.name)
                 metrics.record_tool_call(tool_call.name, arguments)
                 if requires_approval:
                     self.repo.add_tool_call(
@@ -784,6 +782,14 @@ class AgentLoop:
                 return pending_approval
         raise KeyError(f"Unknown pending approval: {approval_id}")
 
+    def _tool_requires_approval(self, tool_name: str) -> bool:
+        if tool_name in APPROVAL_REQUIRED_TOOLS:
+            return self.settings.safety.require_tool_approval
+        try:
+            return self.tools.get(tool_name).requires_approval
+        except UnknownToolError:
+            return False
+
 
 def _utc_now() -> str:
     """Return current UTC time as an ISO string."""
@@ -910,7 +916,7 @@ def create_agent_loop(
 
 def _create_tool_registry(settings: AppSettings) -> ToolRegistry:
     """Create and populate the tool registry with workspace, reporting, dataset, docs, paper, and repo tools."""
-    from app.tools import datasets, docs, papers, repo_analyzer, reporting, workspace
+    from app.tools import datasets, docs, mcp, papers, repo_analyzer, reporting, workspace
 
     registry = ToolRegistry()
     workspace_specs = workspace.get_tool_specs()
@@ -970,6 +976,12 @@ def _create_tool_registry(settings: AppSettings) -> ToolRegistry:
             handler=_make_repo_analyzer_handler(settings),
         )
         registry.register(tool_spec)
+
+    if settings.mcp.enabled:
+        try:
+            mcp.register_mcp_manifest_tools(registry, settings.mcp.manifest_path)
+        except mcp.MCPManifestError as exc:
+            logger.warning("MCP manifest discovery failed, continuing with local tools: %s", exc)
 
     return registry
 
