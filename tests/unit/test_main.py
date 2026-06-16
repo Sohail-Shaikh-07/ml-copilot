@@ -61,3 +61,4 @@ def test_main_prints_config(monkeypatch, capsys, tmp_path) -> None:
     assert exit_code == 0
     assert "ML Copilot configuration" in captured.out
     assert "llm.model=gpt-config" in captured.out
+    assert "mcp.enabled=False" in captured.out

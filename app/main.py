@@ -177,6 +177,8 @@ def format_config(settings: AppSettings) -> str:
             f"safety.require_tool_approval={settings.safety.require_tool_approval}",
             f"safety.allow_destructive_commands={settings.safety.allow_destructive_commands}",
             f"safety.redact_secrets={settings.safety.redact_secrets}",
+            f"mcp.enabled={settings.mcp.enabled}",
+            f"mcp.manifest_path={settings.mcp.manifest_path or '<unset>'}",
         ]
     )
 

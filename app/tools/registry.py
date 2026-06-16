@@ -30,6 +30,8 @@ class ToolSpec:
     description: str
     input_schema: JsonDict
     handler: ToolHandler = field(repr=False)
+    source: str = "builtin"
+    requires_approval: bool = False
 
     def to_openai_tool(self) -> JsonDict:
         return {
@@ -54,6 +56,9 @@ class ToolRegistry:
         self._tools[tool.name] = tool
         return tool
 
+    def has(self, name: str) -> bool:
+        return name in self._tools
+
     def get(self, name: str) -> ToolSpec:
         tool = self._tools.get(name)
         if tool is None:
@@ -62,6 +67,9 @@ class ToolRegistry:
 
     def list_tools(self) -> builtins.list[ToolSpec]:
         return builtins.list(self._tools.values())
+
+    def list_by_source(self, source: str) -> builtins.list[ToolSpec]:
+        return [tool for tool in self._tools.values() if tool.source == source]
 
     def list(self):
         return self.list_tools()

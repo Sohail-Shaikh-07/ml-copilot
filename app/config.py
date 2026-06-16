@@ -56,6 +56,12 @@ class UsageAccountingSettings:
 
 
 @dataclass(frozen=True)
+class MCPSettings:
+    enabled: bool
+    manifest_path: Path | None
+
+
+@dataclass(frozen=True)
 class AppSettings:
     app_name: str
     version: str
@@ -64,6 +70,7 @@ class AppSettings:
     db_path: Path
     safety: SafetySettings
     usage: UsageAccountingSettings
+    mcp: MCPSettings
 
     @classmethod
     def from_paths(cls, paths: AppPaths) -> "AppSettings":
@@ -88,6 +95,10 @@ class AppSettings:
                 prompt_cost_per_1k_tokens_usd=0.0015,
                 completion_cost_per_1k_tokens_usd=0.006,
             ),
+            mcp=MCPSettings(
+                enabled=False,
+                manifest_path=None,
+            ),
         )
 
     @classmethod
@@ -109,6 +120,11 @@ class AppSettings:
         )
         if not db_path.is_absolute():
             db_path = paths.workspace_root / db_path
+
+        mcp_manifest_path = blank_to_none(merged_env.get("ML_COPILOT_MCP_MANIFEST_PATH"))
+        resolved_mcp_manifest_path = Path(mcp_manifest_path) if mcp_manifest_path else None
+        if resolved_mcp_manifest_path is not None and not resolved_mcp_manifest_path.is_absolute():
+            resolved_mcp_manifest_path = paths.workspace_root / resolved_mcp_manifest_path
 
         return cls(
             app_name="ML Copilot",
@@ -157,6 +173,14 @@ class AppSettings:
                     default=0.006,
                     minimum=0.0,
                 ),
+            ),
+            mcp=MCPSettings(
+                enabled=parse_bool(
+                    "ML_COPILOT_ENABLE_MCP",
+                    merged_env.get("ML_COPILOT_ENABLE_MCP"),
+                    default=False,
+                ),
+                manifest_path=resolved_mcp_manifest_path.resolve() if resolved_mcp_manifest_path else None,
             ),
         )
 
