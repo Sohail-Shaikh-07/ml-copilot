@@ -61,6 +61,15 @@ function eventSummary(event: SessionEventPayload) {
   return JSON.stringify(event.data);
 }
 
+function firstNonEmptyText(...values: Array<string | null | undefined>) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) {
+      return value;
+    }
+  }
+  return null;
+}
+
 function toneForStatus(status: string) {
   if (status === 'success' || status === 'completed' || status === 'output-available') return 'success';
   if (status === 'error' || status === 'failed' || status === 'output-error') return 'danger';
@@ -159,7 +168,7 @@ export default function ToolTracePanel({ liveEvents, pendingApprovals, toolCalls
                 <div className="tool-trace-call-list">
                   {group.calls.map((call) => {
                     const duration = formatDuration(call.started_at, call.finished_at);
-                    const summary = call.output ?? call.error ?? 'Waiting for output';
+                    const summary = firstNonEmptyText(call.output, call.error) ?? 'Waiting for output';
                     return (
                       <div key={call.id} className="tool-trace-call">
                         <div className="tool-trace-call-head">
