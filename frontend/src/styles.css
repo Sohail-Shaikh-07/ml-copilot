@@ -296,6 +296,15 @@ button {
   gap: 12px;
 }
 
+.session-sidebar {
+  display: grid;
+  gap: 14px;
+}
+
+.panel-header.compact {
+  margin-bottom: 0;
+}
+
 .session-card {
   width: 100%;
   text-align: left;
@@ -339,6 +348,39 @@ button {
   font-size: 0.76rem;
   color: var(--muted);
   flex-wrap: wrap;
+}
+
+.session-history-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: rgba(8, 15, 28, 0.88);
+}
+
+.session-history-stack,
+.history-items {
+  display: grid;
+  gap: 10px;
+}
+
+.session-history-summary,
+.history-item {
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 16px;
+  background: rgba(3, 7, 18, 0.64);
+}
+
+.history-item p,
+.session-history-summary p {
+  margin: 8px 0 0;
+  color: var(--muted);
+}
+
+.history-item .mini-row {
+  font-size: 0.76rem;
 }
 
 .transcript {
