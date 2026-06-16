@@ -113,3 +113,21 @@ def test_agent_registry_keeps_local_tools_when_mcp_manifest_is_missing(tmp_path:
 
     assert registry.has("list_files")
     assert registry.list_by_source("mcp") == []
+
+
+def test_mcp_tools_require_approval_even_when_global_approval_is_disabled(tmp_path: Path) -> None:
+    manifest = write_manifest(
+        tmp_path / "mcp-tools.json",
+        {"servers": [{"name": "research", "tools": [{"name": "search", "description": "Search."}]}]},
+    )
+    settings = AppSettings.load(
+        environ={
+            "ML_COPILOT_WORKSPACE_ROOT": str(tmp_path),
+            "ML_COPILOT_REQUIRE_TOOL_APPROVAL": "false",
+            "ML_COPILOT_ENABLE_MCP": "true",
+            "ML_COPILOT_MCP_MANIFEST_PATH": str(manifest),
+        }
+    )
+    registry = _create_tool_registry(settings)
+
+    assert registry.get("mcp__research__search").requires_approval is True

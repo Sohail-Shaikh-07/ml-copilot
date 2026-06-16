@@ -429,9 +429,7 @@ class AgentLoop:
                     )
                     continue
 
-                requires_approval = self.settings.safety.require_tool_approval and self._tool_requires_approval(
-                    tool_call.name
-                )
+                requires_approval = self._tool_requires_approval(tool_call.name)
                 metrics.record_tool_call(tool_call.name, arguments)
                 if requires_approval:
                     self.repo.add_tool_call(
@@ -786,7 +784,7 @@ class AgentLoop:
 
     def _tool_requires_approval(self, tool_name: str) -> bool:
         if tool_name in APPROVAL_REQUIRED_TOOLS:
-            return True
+            return self.settings.safety.require_tool_approval
         try:
             return self.tools.get(tool_name).requires_approval
         except UnknownToolError:
