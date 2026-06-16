@@ -11,9 +11,10 @@
 ## GitHub Issue
 
 - Title: `ML-### / short task title`
-- Body sections: `Goal`, `Context`, `Scope`, `Acceptance Criteria`, `Notion`
+- Body sections: `Context`, `What needs to be done`, `Notes`
 - Assignee: the active owner doing the work
 - Labels: match the task type and keep them consistent with the PR
+- Do not include internal project-management metadata in the issue body
 
 ## Pull Request
 
@@ -22,6 +23,8 @@
 - Assignee: the active owner
 - Labels: match the issue labels exactly
 - Use a concise human tone, like a teammate handoff instead of a generated log
+- Reference the GitHub issue in the `Reference` section
+- Do not include internal project-management metadata in the PR body
 
 ## Review
 

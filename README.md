@@ -21,14 +21,17 @@ Most agent demos can talk about ML code. Fewer can work through an actual ML eng
 
 ## Product Shape
 
-The first version is intentionally narrow:
+The current release candidate is intentionally narrow:
 
 - Python backend and agent runtime
 - SQLite persistence
 - CLI for chat and repo workflows
 - FastAPI API with streaming events
+- React + Vite frontend shell for sessions, approvals, and tool traces
+- fixture-based eval runner with persisted scoring reports
+- Docker image for local deployment review
 - a small set of trustworthy tools
-- ML-specific helpers added only after the core loop is stable
+- ML-specific helpers for repository, dataset, docs, paper, and reporting workflows
 
 ## Architecture
 
@@ -137,36 +140,93 @@ Assistant responds
 - docs and paper helpers
 - eval runner
 - React + Vite frontend shell for chat, approvals, and tool traces
+- release packaging and documentation hardening
 
 ## Repo Boundaries
 
 This repository is only for the actual `ML Copilot` product.
 
-Planning notes and local reference material live outside this repo in the parent workspace, including:
-
-- project planning documents
-- Notion and issue workflow notes
-- `.codex-reference/ml-intern`
-
-That keeps the Git repository clean while still letting AI tooling use the surrounding workspace for context.
+Planning notes, local reference material, and personal workflow documents should stay outside this repository. That keeps the public Git history focused on product code, tests, docs, and release artifacts.
 
 ## Workflow Notes
 
 - [Issue and PR workflow guidance](docs/phase-2-issue-pr-workflow.md)
+- [Release readiness guide](docs/release-readiness.md)
+- [Eval runner guide](docs/phase-3-eval-runner.md)
 - Keep GitHub issue and PR titles aligned with the task ID and task name.
 - Keep issue labels, PR labels, and assignees in sync for each certified task.
 
-## Planned Stack
+## Setup
 
-- Python 3.12
-- FastAPI
-- Pydantic
-- SQLite
-- `httpx`
-- `uv`
-- `pytest`
-- `ruff`
-- React + TypeScript later, after backend contracts stabilize
+ML Copilot targets Python 3.12 and Node.js 22 for the bundled frontend.
+
+Install the backend in editable mode:
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+Install frontend dependencies:
+
+```bash
+cd frontend
+npm ci
+```
+
+Create a runtime environment file from the example:
+
+```bash
+cp .env.example .env
+```
+
+Set at least `LLM_API_KEY` and, when needed, adjust `LLM_BASE_URL`, `LLM_MODEL`, `ML_COPILOT_DB_PATH`, and the safety flags.
+
+## Run Locally
+
+Print the resolved backend configuration with secrets redacted:
+
+```bash
+python -m app.main --print-config
+```
+
+Run a CLI task:
+
+```bash
+python -m app.main run "Analyze this repository and summarize the ML components."
+```
+
+Start the API:
+
+```bash
+python -m uvicorn app.api:create_app --factory --host 127.0.0.1 --port 8000
+```
+
+Start the frontend in another terminal:
+
+```bash
+cd frontend
+npm run dev
+```
+
+The development frontend proxies `/api` to `http://127.0.0.1:8000`.
+
+## Validate
+
+Run the main local checks before opening a PR:
+
+```bash
+python -m pytest -q
+python -m ruff check app/ tests/
+python -m ruff format --check app/ tests/
+python -m mypy app/ --ignore-missing-imports --follow-imports=skip
+cd frontend && npm run build
+```
+
+Run a bundled eval fixture:
+
+```bash
+python -m app.main eval tests/fixtures/evals/ml-201-repo-analysis.json
+```
 
 ## Deployment Image
 
@@ -189,6 +249,18 @@ docker run --rm -p 8000:8000 \
 
 The image listens on port `8000`, stores the default SQLite database at `/data/ml-copilot.db`, and expects secrets such as `LLM_API_KEY` to be provided at runtime through environment variables or `--env-file`. The Docker build intentionally ignores local `.env` files, virtual environments, frontend build output, and `.ml-copilot` runtime data.
 
+## Safety Model
+
+ML Copilot is designed for inspectable local automation, not silent autonomous control:
+
+- tool calls are validated before execution
+- risky workspace actions can require explicit approval
+- destructive commands are disabled by default
+- secrets are redacted in user-facing configuration output
+- session history, tool calls, approvals, events, and usage metrics are persisted for review
+
+See [release readiness](docs/release-readiness.md) for the current limitations and release checklist.
+
 ## Success Criteria For MVP
 
 The MVP is successful when a user can:
@@ -203,4 +275,4 @@ The MVP is successful when a user can:
 
 ## Status
 
-Scaffolding the public repository and defining the architecture baseline.
+Phase 3 has backend, CLI, API, frontend, eval, observability, and Docker foundations in place for release review. Full autonomous research-and-training behavior remains future work.
