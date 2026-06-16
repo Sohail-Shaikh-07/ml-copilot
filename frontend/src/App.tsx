@@ -10,6 +10,7 @@ import {
   sendChatMessage,
 } from './api';
 import ApprovalDialog from './components/ApprovalDialog';
+import SessionSidebar from './components/SessionSidebar';
 import ToolTracePanel from './components/ToolTracePanel';
 import type {
   ApprovalDecisionRequest,
@@ -42,10 +43,6 @@ function formatTimestamp(value: string) {
 
 function titleForSession(session: SessionSummary | SessionDetail) {
   return session.title?.trim() || 'Untitled session';
-}
-
-function shortId(value: string) {
-  return value.slice(0, 8);
 }
 
 function roleLabel(role: string) {
@@ -329,69 +326,20 @@ function App() {
 
       <main className="workspace">
         <aside className="panel sidebar">
-          <div className="panel-header">
-            <div>
-              <p className="panel-label">Sessions</p>
-              <h2>{sessions.length} in play</h2>
-            </div>
-            <button className="ghost-button" type="button" onClick={() => void refreshSessions()}>
-              Refresh
-            </button>
-          </div>
-
-          <form className="composer-card" onSubmit={handleCreateSession}>
-            <label>
-              Session title
-              <input
-                value={draftTitle}
-                onChange={(event) => setDraftTitle(event.target.value)}
-                placeholder="Plan a dataset audit"
-              />
-            </label>
-            <label>
-              Model
-              <input
-                value={draftModel}
-                onChange={(event) => setDraftModel(event.target.value)}
-                placeholder="gpt-5.4"
-              />
-            </label>
-            <button className="primary-button" type="submit" disabled={creating}>
-              {creating ? 'Creating...' : 'Create session'}
-            </button>
-          </form>
-
-          <div className="session-list">
-            {sessions.length === 0 ? (
-              <div className="empty-state compact">
-                <strong>No sessions yet.</strong>
-                <p>Once the backend is running, this rail will show live session history.</p>
-              </div>
-            ) : (
-              sessions.map((session) => {
-                const isActive = session.id === selectedSessionId;
-                return (
-                  <button
-                    key={session.id}
-                    type="button"
-                    className={`session-card ${isActive ? 'active' : ''}`}
-                    onClick={() => setSelectedSessionId(session.id)}
-                  >
-                    <div className="session-card-top">
-                      <strong>{titleForSession(session)}</strong>
-                      <span className={`status-pill ${statusTone(session.status)}`}>{session.status}</span>
-                    </div>
-                    <p>{session.model}</p>
-                    <div className="session-card-meta">
-                      <span>{session.message_count} messages</span>
-                      <span>{session.pending_approval_count} approvals</span>
-                      <span>{shortId(session.id)}</span>
-                    </div>
-                  </button>
-                );
-              })
-            )}
-          </div>
+          <SessionSidebar
+            activeSession={activeSession}
+            creating={creating}
+            draftModel={draftModel}
+            draftTitle={draftTitle}
+            messages={messages}
+            onCreateSession={handleCreateSession}
+            onRefreshSessions={() => void refreshSessions()}
+            onSelectSession={setSelectedSessionId}
+            selectedSessionId={selectedSessionId}
+            sessions={sessions}
+            setDraftModel={setDraftModel}
+            setDraftTitle={setDraftTitle}
+          />
         </aside>
 
         <section className="panel transcript">
