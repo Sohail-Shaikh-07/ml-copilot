@@ -86,6 +86,22 @@ Each run writes:
 
 The same report payload is persisted in SQLite under `eval_runs.report_json`.
 
+## Scoring Report Format
+
+Each report includes a `scoring` object with stable fields for downstream
+automation:
+
+- `task_success`: whether all configured checks passed
+- `tests_passed` and `tests_total`: check pass count and total check count
+- `files_changed`: flattened list of created, modified, or deleted workspace files
+- `file_changes`: created, modified, and deleted file lists
+- `safety_events`: approval, error, interruption, and approval-tool-call summary
+- `token_usage`: prompt, completion, and total token counts when available
+- `runtime`: start time, finish time, and elapsed seconds
+
+The Markdown report mirrors the same information with dedicated sections for
+changed files, safety events, and check results.
+
 ## Bundled Fixtures
 
 The first seeded eval fixtures live under `tests/fixtures/evals/`:

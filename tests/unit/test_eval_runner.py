@@ -42,7 +42,28 @@ async def test_eval_runner_writes_workspace_scores_and_artifacts(tmp_path: Path)
         session: SessionRecord,
     ) -> dict[str, object]:
         (workspace_path / "summary.md").write_text("artifact created\n", encoding="utf-8")
-        return {"content": "done", "session_id": session.id}
+        (workspace_path / "input.txt").write_text("seed data updated\n", encoding="utf-8")
+        repository.add_event(
+            session_id=session.id,
+            turn_id="turn-1",
+            event_type="approval_required",
+            data={"tool_name": "run_command"},
+            sequence=0,
+        )
+        repository.add_tool_call(
+            session_id=session.id,
+            turn_id="turn-1",
+            tool_name="run_command",
+            arguments={"command": "pytest"},
+            status="pending_approval",
+            requires_approval=True,
+            tool_call_id="tool-1",
+        )
+        return {
+            "content": "done",
+            "session_id": session.id,
+            "usage": {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18},
+        }
 
     result = await EvalRunner(settings, repository=repository, agent_runner=fake_agent).run_fixture(
         fixture,
@@ -51,7 +72,7 @@ async def test_eval_runner_writes_workspace_scores_and_artifacts(tmp_path: Path)
 
     assert result.record.status == "passed"
     assert result.record.score == 1.0
-    assert (result.workspace_path / "input.txt").read_text(encoding="utf-8") == "seed data"
+    assert (result.workspace_path / "input.txt").read_text(encoding="utf-8") == "seed data updated\n"
     assert result.report_path.exists()
     assert result.markdown_path.exists()
 
@@ -59,6 +80,19 @@ async def test_eval_runner_writes_workspace_scores_and_artifacts(tmp_path: Path)
     assert report["fixture"]["id"] == "fixture-pass"
     assert report["status"] == "passed"
     assert all(check["passed"] for check in report["checks"])
+    assert report["scoring"]["task_success"] is True
+    assert report["scoring"]["tests_passed"] == 3
+    assert report["scoring"]["tests_total"] == 3
+    assert report["scoring"]["file_changes"]["created"] == ["summary.md"]
+    assert report["scoring"]["file_changes"]["modified"] == ["input.txt"]
+    assert report["scoring"]["files_changed"] == ["input.txt", "summary.md"]
+    assert report["scoring"]["safety_events"]["approval_required_count"] == 1
+    assert report["scoring"]["safety_events"]["approval_tool_calls"][0]["tool_name"] == "run_command"
+    assert report["scoring"]["token_usage"]["total_tokens"] == 18
+    assert report["scoring"]["runtime"]["seconds"] >= 0
+    markdown = result.markdown_path.read_text(encoding="utf-8")
+    assert "## Changed Files" in markdown
+    assert "## Safety Events" in markdown
     assert repository.list_eval_runs("fixture-pass") == [result.record]
 
 
@@ -94,6 +128,9 @@ async def test_eval_runner_records_failed_checks(tmp_path: Path) -> None:
     assert result.record.status == "failed"
     assert result.record.score == pytest.approx(2 / 3, abs=0.0001)
     assert [check["passed"] for check in report["checks"]] == [True, False]
+    assert report["scoring"]["task_success"] is False
+    assert report["scoring"]["tests_passed"] == 1
+    assert report["scoring"]["tests_total"] == 2
 
 
 @pytest.mark.asyncio
