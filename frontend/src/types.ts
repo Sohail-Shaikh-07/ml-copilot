@@ -57,3 +57,33 @@ export interface MessagePayload {
   sequence: number;
   created_at: string;
 }
+
+export interface ChatRequest {
+  message: string;
+  system_prompt?: string | null;
+}
+
+export interface TurnResultPayload {
+  status: string;
+  content: string | null;
+  iterations: number | null;
+  approval_ids: string[];
+  pending_approvals: PendingApprovalPayload[];
+  resolved_approval_id: string | null;
+}
+
+export interface ChatResponse {
+  session: SessionDetail;
+  result: TurnResultPayload;
+  messages: MessagePayload[];
+}
+
+export interface SessionEventPayload {
+  id: string;
+  session_id: string;
+  turn_id: string;
+  event_type: string;
+  data: Record<string, unknown>;
+  sequence: number;
+  created_at: string;
+}

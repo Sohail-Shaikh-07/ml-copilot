@@ -1,6 +1,9 @@
 import type {
+  ChatRequest,
+  ChatResponse,
   CreateSessionRequest,
   MessagePayload,
+  SessionEventPayload,
   SessionDetail,
   SessionSummary,
 } from './types';
@@ -48,4 +51,33 @@ export function createSession(payload: CreateSessionRequest) {
     method: 'POST',
     body: JSON.stringify(payload),
   });
+}
+
+export function sendChatMessage(sessionId: string, payload: ChatRequest) {
+  return request<ChatResponse>(`/api/chat/${sessionId}`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function createSessionEventSource(
+  sessionId: string,
+  options: {
+    after?: number;
+    onEvent: (event: SessionEventPayload) => void;
+    onError: () => void;
+  },
+) {
+  const query = options.after !== undefined ? `?after=${options.after}` : '';
+  const source = new EventSource(`${API_BASE_URL}/api/events/${sessionId}${query}`);
+
+  source.onmessage = (message) => {
+    options.onEvent(JSON.parse(message.data) as SessionEventPayload);
+  };
+  source.onerror = () => {
+    source.close();
+    options.onError();
+  };
+
+  return source;
 }
