@@ -18,6 +18,13 @@ class ChatRequest(BaseModel):
     system_prompt: str | None = None
 
 
+class ApprovalDecisionRequest(BaseModel):
+    approved: bool
+    user_feedback: str | None = None
+    edited_arguments: dict[str, Any] | None = None
+    system_prompt: str | None = None
+
+
 class PendingApprovalPayload(BaseModel):
     approval_id: str
     tool_call_id: str

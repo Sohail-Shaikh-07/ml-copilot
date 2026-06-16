@@ -16,6 +16,7 @@ from app.storage.repository import SQLiteRepository
 
 from .runtime import ActiveTurnManager
 from .schemas import (
+    ApprovalDecisionRequest,
     ChatRequest,
     ChatResponse,
     CreateSessionRequest,
@@ -127,6 +128,60 @@ def create_app(
                 user_message=payload.message,
                 system_prompt=payload.system_prompt,
             )
+        except asyncio.CancelledError:
+            result = {"status": "interrupted"}
+        except Exception:
+            repo.update_session(session_id, status="error")
+            raise
+        finally:
+            active_turn_manager.unregister(session_id, current_task)
+            loop.remove_event_handler(event_stream_manager.publish)
+
+        updated_session = repo.update_session(session_id, status=_status_for_turn_result(result["status"]))
+        return ChatResponse(
+            session=_serialize_session_detail(repo, updated_session),
+            result=_serialize_turn_result(result),
+            messages=[_serialize_message(message) for message in repo.list_messages(session_id)],
+        )
+
+    @router.post("/approval/{session_id}/{approval_id}", response_model=ChatResponse)
+    async def resolve_approval(
+        session_id: str,
+        approval_id: str,
+        payload: ApprovalDecisionRequest,
+        request: Request,
+        repo: RepositoryDep,
+        loop: LoopDep,
+    ) -> ChatResponse:
+        session = _get_session_or_404(repo, session_id)
+        active_turn_manager = get_active_turn_manager(request)
+        if not active_turn_manager.register(session_id, loop):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Session already has an active turn",
+            )
+
+        repo.update_session(session_id, status="processing")
+        event_stream_manager = get_event_stream_manager(request)
+        loop.add_event_handler(event_stream_manager.publish)
+        current_task = asyncio.current_task()
+
+        try:
+            result = await loop.resume_pending_approval(
+                session=session,
+                approval_id=approval_id,
+                approved=payload.approved,
+                user_feedback=payload.user_feedback,
+                edited_arguments=payload.edited_arguments,
+                system_prompt=payload.system_prompt,
+            )
+        except KeyError as exc:
+            fallback_status = "waiting_approval" if repo.list_pending_approvals(session_id) else "idle"
+            repo.update_session(session_id, status=fallback_status)
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Pending approval not found",
+            ) from exc
         except asyncio.CancelledError:
             result = {"status": "interrupted"}
         except Exception:

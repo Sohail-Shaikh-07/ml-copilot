@@ -63,6 +63,13 @@ export interface ChatRequest {
   system_prompt?: string | null;
 }
 
+export interface ApprovalDecisionRequest {
+  approved: boolean;
+  user_feedback?: string | null;
+  edited_arguments?: Record<string, unknown> | null;
+  system_prompt?: string | null;
+}
+
 export interface TurnResultPayload {
   status: string;
   content: string | null;

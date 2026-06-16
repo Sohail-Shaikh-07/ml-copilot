@@ -1,4 +1,5 @@
 import type {
+  ApprovalDecisionRequest,
   ChatRequest,
   ChatResponse,
   CreateSessionRequest,
@@ -55,6 +56,13 @@ export function createSession(payload: CreateSessionRequest) {
 
 export function sendChatMessage(sessionId: string, payload: ChatRequest) {
   return request<ChatResponse>(`/api/chat/${sessionId}`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function resolveApproval(sessionId: string, approvalId: string, payload: ApprovalDecisionRequest) {
+  return request<ChatResponse>(`/api/approval/${sessionId}/${approvalId}`, {
     method: 'POST',
     body: JSON.stringify(payload),
   });
