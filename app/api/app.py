@@ -8,6 +8,7 @@ from typing import Annotated, Any, Callable
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.agent.loop import AgentLoop, create_agent_loop
 from app.config import AppSettings
@@ -233,6 +234,7 @@ def create_app(
         )
 
     app.include_router(router)
+    _mount_frontend_if_available(app, resolved_settings)
     return app
 
 
@@ -273,6 +275,13 @@ def _default_repository_factory(settings: AppSettings) -> SQLiteRepository:
 
 def _default_loop_factory(settings: AppSettings, repository: SQLiteRepository) -> AgentLoop:
     return create_agent_loop(settings, repository=repository)
+
+
+def _mount_frontend_if_available(app: FastAPI, settings: AppSettings) -> None:
+    frontend_dist = settings.paths.workspace_root / "frontend" / "dist"
+    index_file = frontend_dist / "index.html"
+    if index_file.exists():
+        app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")
 
 
 RepositoryDep = Annotated[SQLiteRepository, Depends(get_repository)]

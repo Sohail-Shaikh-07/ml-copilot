@@ -149,6 +149,22 @@ def test_missing_session_returns_404(tmp_path: Path) -> None:
     assert response.json() == {"detail": "Session not found"}
 
 
+def test_frontend_dist_is_served_when_available(tmp_path: Path) -> None:
+    frontend_dist = tmp_path / "frontend" / "dist"
+    frontend_dist.mkdir(parents=True)
+    (frontend_dist / "index.html").write_text("<main>ML Copilot UI</main>", encoding="utf-8")
+
+    app = create_app(_settings(tmp_path))
+    client = TestClient(app)
+
+    response = client.get("/")
+    api_response = client.get("/api/sessions")
+
+    assert response.status_code == 200
+    assert "ML Copilot UI" in response.text
+    assert api_response.status_code == 200
+
+
 def test_event_stream_receives_live_events_for_chat_turn(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
 

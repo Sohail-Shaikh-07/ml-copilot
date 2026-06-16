@@ -168,6 +168,27 @@ That keeps the Git repository clean while still letting AI tooling use the surro
 - `ruff`
 - React + TypeScript later, after backend contracts stabilize
 
+## Deployment Image
+
+The repository includes a production-oriented Dockerfile that builds the React frontend, installs the Python backend package, and serves both from the FastAPI runtime.
+
+Build the image:
+
+```bash
+docker build -t ml-copilot .
+```
+
+Run the API and bundled frontend:
+
+```bash
+docker run --rm -p 8000:8000 \
+  --env-file .env \
+  -v ml-copilot-data:/data \
+  ml-copilot
+```
+
+The image listens on port `8000`, stores the default SQLite database at `/data/ml-copilot.db`, and expects secrets such as `LLM_API_KEY` to be provided at runtime through environment variables or `--env-file`. The Docker build intentionally ignores local `.env` files, virtual environments, frontend build output, and `.ml-copilot` runtime data.
+
 ## Success Criteria For MVP
 
 The MVP is successful when a user can:
