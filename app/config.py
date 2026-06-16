@@ -50,6 +50,12 @@ class SafetySettings:
 
 
 @dataclass(frozen=True)
+class UsageAccountingSettings:
+    prompt_cost_per_1k_tokens_usd: float
+    completion_cost_per_1k_tokens_usd: float
+
+
+@dataclass(frozen=True)
 class AppSettings:
     app_name: str
     version: str
@@ -57,6 +63,7 @@ class AppSettings:
     llm: LLMSettings
     db_path: Path
     safety: SafetySettings
+    usage: UsageAccountingSettings
 
     @classmethod
     def from_paths(cls, paths: AppPaths) -> "AppSettings":
@@ -76,6 +83,10 @@ class AppSettings:
                 require_tool_approval=True,
                 allow_destructive_commands=False,
                 redact_secrets=True,
+            ),
+            usage=UsageAccountingSettings(
+                prompt_cost_per_1k_tokens_usd=0.0015,
+                completion_cost_per_1k_tokens_usd=0.006,
             ),
         )
 
@@ -133,6 +144,20 @@ class AppSettings:
                     default=True,
                 ),
             ),
+            usage=UsageAccountingSettings(
+                prompt_cost_per_1k_tokens_usd=parse_float(
+                    "LLM_PROMPT_COST_PER_1K_TOKENS_USD",
+                    merged_env.get("LLM_PROMPT_COST_PER_1K_TOKENS_USD"),
+                    default=0.0015,
+                    minimum=0.0,
+                ),
+                completion_cost_per_1k_tokens_usd=parse_float(
+                    "LLM_COMPLETION_COST_PER_1K_TOKENS_USD",
+                    merged_env.get("LLM_COMPLETION_COST_PER_1K_TOKENS_USD"),
+                    default=0.006,
+                    minimum=0.0,
+                ),
+            ),
         )
 
 
@@ -160,6 +185,16 @@ def parse_int(name: str, value: str | None, *, default: int, minimum: int | None
         return default
 
     parsed = int(value)
+    if minimum is not None and parsed < minimum:
+        raise ValueError(f"{name} must be >= {minimum}, got {parsed}.")
+    return parsed
+
+
+def parse_float(name: str, value: str | None, *, default: float, minimum: float | None = None) -> float:
+    if value is None:
+        return default
+
+    parsed = float(value)
     if minimum is not None and parsed < minimum:
         raise ValueError(f"{name} must be >= {minimum}, got {parsed}.")
     return parsed

@@ -32,6 +32,22 @@ class PendingApprovalPayload(BaseModel):
     arguments: dict[str, Any]
 
 
+class SessionMetricsSummary(BaseModel):
+    session_id: str
+    turn_count: int
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    estimated_cost_usd: float
+    tool_calls: int
+    tool_errors: int
+    tool_retries: int
+    tool_latency_ms: float
+    average_tool_latency_ms: float
+    error_count: int
+    last_updated_at: str | None
+
+
 class ToolCallPayload(BaseModel):
     id: str
     session_id: str
@@ -72,6 +88,7 @@ class SessionSummary(BaseModel):
     message_count: int
     event_count: int
     pending_approval_count: int
+    metrics: SessionMetricsSummary
 
 
 class SessionDetail(SessionSummary):

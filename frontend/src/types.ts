@@ -15,6 +15,23 @@ export interface SessionSummary {
   message_count: number;
   event_count: number;
   pending_approval_count: number;
+  metrics: SessionMetricsSummary;
+}
+
+export interface SessionMetricsSummary {
+  session_id: string;
+  turn_count: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+  tool_calls: number;
+  tool_errors: number;
+  tool_retries: number;
+  tool_latency_ms: number;
+  average_tool_latency_ms: number;
+  error_count: number;
+  last_updated_at: string | null;
 }
 
 export interface PendingApprovalPayload {

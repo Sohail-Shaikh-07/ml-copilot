@@ -1,8 +1,14 @@
-import type { PendingApprovalPayload, SessionEventPayload, ToolCallPayload } from '../types';
+import type {
+  PendingApprovalPayload,
+  SessionEventPayload,
+  SessionMetricsSummary,
+  ToolCallPayload,
+} from '../types';
 
 interface ToolTracePanelProps {
   liveEvents: SessionEventPayload[];
   pendingApprovals: PendingApprovalPayload[];
+  metrics: SessionMetricsSummary | null;
   toolCalls: ToolCallPayload[];
 }
 
@@ -77,6 +83,14 @@ function toneForStatus(status: string) {
   return 'neutral';
 }
 
+function formatCompact(value: number) {
+  return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 4 }).format(value);
+}
+
 function groupToolCalls(toolCalls: ToolCallPayload[]) {
   const sorted = [...toolCalls].sort((a, b) => {
     const aTime = a.started_at ?? a.finished_at ?? '';
@@ -102,7 +116,7 @@ function groupToolCalls(toolCalls: ToolCallPayload[]) {
   return groups;
 }
 
-export default function ToolTracePanel({ liveEvents, pendingApprovals, toolCalls }: ToolTracePanelProps) {
+export default function ToolTracePanel({ liveEvents, pendingApprovals, metrics, toolCalls }: ToolTracePanelProps) {
   const grouped = groupToolCalls(toolCalls);
   const recentEvents = liveEvents.slice(-6);
 
@@ -115,6 +129,11 @@ export default function ToolTracePanel({ liveEvents, pendingApprovals, toolCalls
             <h3>
               {toolCalls.length} calls across {grouped.length} turns
             </h3>
+            <p className="muted">
+              {metrics
+                ? `${formatCompact(metrics.total_tokens)} tokens · ${formatCurrency(metrics.estimated_cost_usd)} est. spend`
+                : 'Usage metrics will appear after the first completed turn.'}
+            </p>
           </div>
           <span className="status-chip neutral">{recentEvents.length} live events</span>
         </div>

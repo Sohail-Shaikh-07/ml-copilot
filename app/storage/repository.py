@@ -15,8 +15,10 @@ from app.storage.models import (
     MessageRecord,
     PendingApprovalRecord,
     SessionHistory,
+    SessionMetricsSummary,
     SessionRecord,
     ToolCallRecord,
+    TurnMetricsRecord,
     utc_now,
 )
 
@@ -101,6 +103,29 @@ SCHEMA_STATEMENTS = (
         started_at TEXT NOT NULL,
         finished_at TEXT,
         report_json TEXT NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS turn_metrics (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        turn_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        iterations INTEGER NOT NULL,
+        prompt_tokens INTEGER NOT NULL,
+        completion_tokens INTEGER NOT NULL,
+        total_tokens INTEGER NOT NULL,
+        estimated_cost_usd REAL NOT NULL,
+        tool_calls INTEGER NOT NULL,
+        tool_errors INTEGER NOT NULL,
+        tool_retries INTEGER NOT NULL,
+        tool_latency_ms REAL NOT NULL,
+        error_count INTEGER NOT NULL,
+        started_at TEXT NOT NULL,
+        finished_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE (session_id, turn_id),
         FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
     )
     """,
@@ -885,6 +910,183 @@ class SQLiteRepository:
             rows = connection.execute(query, params).fetchall()
         return [_eval_run_from_row(row) for row in rows]
 
+    def add_turn_metrics(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        status: str,
+        iterations: int,
+        prompt_tokens: int,
+        completion_tokens: int,
+        total_tokens: int,
+        estimated_cost_usd: float,
+        tool_calls: int,
+        tool_errors: int,
+        tool_retries: int,
+        tool_latency_ms: float,
+        error_count: int,
+        started_at: str,
+        finished_at: str,
+        metric_id: str | None = None,
+    ) -> TurnMetricsRecord:
+        record = TurnMetricsRecord(
+            id=metric_id or str(uuid.uuid4()),
+            session_id=session_id,
+            turn_id=turn_id,
+            status=status,
+            iterations=iterations,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            estimated_cost_usd=estimated_cost_usd,
+            tool_calls=tool_calls,
+            tool_errors=tool_errors,
+            tool_retries=tool_retries,
+            tool_latency_ms=tool_latency_ms,
+            error_count=error_count,
+            started_at=started_at,
+            finished_at=finished_at,
+            created_at=utc_now(),
+        )
+        with connect_sqlite(self.database_path) as connection:
+            connection.execute(
+                """
+                INSERT INTO turn_metrics (
+                    id,
+                    session_id,
+                    turn_id,
+                    status,
+                    iterations,
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    estimated_cost_usd,
+                    tool_calls,
+                    tool_errors,
+                    tool_retries,
+                    tool_latency_ms,
+                    error_count,
+                    started_at,
+                    finished_at,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id, turn_id) DO UPDATE SET
+                    status = excluded.status,
+                    iterations = excluded.iterations,
+                    prompt_tokens = excluded.prompt_tokens,
+                    completion_tokens = excluded.completion_tokens,
+                    total_tokens = excluded.total_tokens,
+                    estimated_cost_usd = excluded.estimated_cost_usd,
+                    tool_calls = excluded.tool_calls,
+                    tool_errors = excluded.tool_errors,
+                    tool_retries = excluded.tool_retries,
+                    tool_latency_ms = excluded.tool_latency_ms,
+                    error_count = excluded.error_count,
+                    started_at = excluded.started_at,
+                    finished_at = excluded.finished_at
+                """,
+                (
+                    record.id,
+                    record.session_id,
+                    record.turn_id,
+                    record.status,
+                    record.iterations,
+                    record.prompt_tokens,
+                    record.completion_tokens,
+                    record.total_tokens,
+                    record.estimated_cost_usd,
+                    record.tool_calls,
+                    record.tool_errors,
+                    record.tool_retries,
+                    record.tool_latency_ms,
+                    record.error_count,
+                    record.started_at,
+                    record.finished_at,
+                    record.created_at,
+                ),
+            )
+            self._touch_session(connection, session_id)
+            connection.commit()
+        return record
+
+    def list_turn_metrics(self, session_id: str) -> list[TurnMetricsRecord]:
+        with connect_sqlite(self.database_path) as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    id,
+                    session_id,
+                    turn_id,
+                    status,
+                    iterations,
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    estimated_cost_usd,
+                    tool_calls,
+                    tool_errors,
+                    tool_retries,
+                    tool_latency_ms,
+                    error_count,
+                    started_at,
+                    finished_at,
+                    created_at
+                FROM turn_metrics
+                WHERE session_id = ?
+                ORDER BY created_at ASC, turn_id ASC
+                """,
+                (session_id,),
+            ).fetchall()
+        return [_turn_metrics_from_row(row) for row in rows]
+
+    def get_session_metrics_summary(self, session_id: str) -> SessionMetricsSummary:
+        metrics = self.list_turn_metrics(session_id)
+        if not metrics:
+            return SessionMetricsSummary(
+                session_id=session_id,
+                turn_count=0,
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=0,
+                estimated_cost_usd=0.0,
+                tool_calls=0,
+                tool_errors=0,
+                tool_retries=0,
+                tool_latency_ms=0.0,
+                average_tool_latency_ms=0.0,
+                error_count=0,
+                last_updated_at=None,
+            )
+
+        prompt_tokens = sum(metric.prompt_tokens for metric in metrics)
+        completion_tokens = sum(metric.completion_tokens for metric in metrics)
+        total_tokens = sum(metric.total_tokens for metric in metrics)
+        estimated_cost_usd = round(sum(metric.estimated_cost_usd for metric in metrics), 6)
+        tool_calls = sum(metric.tool_calls for metric in metrics)
+        tool_errors = sum(metric.tool_errors for metric in metrics)
+        tool_retries = sum(metric.tool_retries for metric in metrics)
+        tool_latency_ms = round(sum(metric.tool_latency_ms for metric in metrics), 2)
+        error_count = sum(metric.error_count for metric in metrics)
+        last_updated_at = max(metric.finished_at for metric in metrics)
+
+        return SessionMetricsSummary(
+            session_id=session_id,
+            turn_count=len(metrics),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            estimated_cost_usd=estimated_cost_usd,
+            tool_calls=tool_calls,
+            tool_errors=tool_errors,
+            tool_retries=tool_retries,
+            tool_latency_ms=tool_latency_ms,
+            average_tool_latency_ms=round(tool_latency_ms / tool_calls, 2) if tool_calls else 0.0,
+            error_count=error_count,
+            last_updated_at=last_updated_at,
+        )
+
     def get_session_history(self, session_id: str) -> SessionHistory:
         session = self.get_session(session_id)
         if session is None:
@@ -1029,4 +1231,26 @@ def _eval_run_from_row(row: sqlite3.Row) -> EvalRunRecord:
         started_at=row["started_at"],
         finished_at=row["finished_at"],
         report_json=row["report_json"],
+    )
+
+
+def _turn_metrics_from_row(row: sqlite3.Row) -> TurnMetricsRecord:
+    return TurnMetricsRecord(
+        id=row["id"],
+        session_id=row["session_id"],
+        turn_id=row["turn_id"],
+        status=row["status"],
+        iterations=row["iterations"],
+        prompt_tokens=row["prompt_tokens"],
+        completion_tokens=row["completion_tokens"],
+        total_tokens=row["total_tokens"],
+        estimated_cost_usd=row["estimated_cost_usd"],
+        tool_calls=row["tool_calls"],
+        tool_errors=row["tool_errors"],
+        tool_retries=row["tool_retries"],
+        tool_latency_ms=row["tool_latency_ms"],
+        error_count=row["error_count"],
+        started_at=row["started_at"],
+        finished_at=row["finished_at"],
+        created_at=row["created_at"],
     )
