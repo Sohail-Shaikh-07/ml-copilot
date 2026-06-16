@@ -148,6 +148,21 @@ button {
   border-color: rgba(56, 189, 248, 0.28);
 }
 
+.status-chip.success {
+  color: #bbf7d0;
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.status-chip.danger {
+  color: #fecdd3;
+  border-color: rgba(251, 113, 133, 0.35);
+}
+
+.status-chip.neutral {
+  color: #bfdbfe;
+  border-color: rgba(56, 189, 248, 0.28);
+}
+
 .banner {
   position: relative;
   z-index: 1;
@@ -366,6 +381,11 @@ button {
   background: linear-gradient(135deg, rgba(15, 23, 42, 0.9), rgba(17, 24, 39, 0.98));
 }
 
+.message.live {
+  border-color: rgba(56, 189, 248, 0.42);
+  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.12);
+}
+
 .message.system {
   background: rgba(69, 26, 3, 0.42);
 }
@@ -382,6 +402,14 @@ button {
   border-radius: 22px;
 }
 
+.composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .composer-shell textarea {
   resize: vertical;
   min-height: 104px;
@@ -395,6 +423,19 @@ button {
 .info-card h3 {
   margin: 0;
   font-size: 0.92rem;
+}
+
+.event-card {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.event-card p {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
 .muted {

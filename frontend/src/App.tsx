@@ -1,10 +1,27 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { createSession, fetchMessages, fetchSession, fetchSessions, getApiBaseLabel } from './api';
-import type { MessagePayload, PendingApprovalPayload, SessionDetail, SessionSummary, ToolCallPayload } from './types';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  createSession,
+  createSessionEventSource,
+  fetchMessages,
+  fetchSession,
+  fetchSessions,
+  getApiBaseLabel,
+  sendChatMessage,
+} from './api';
+import type {
+  MessagePayload,
+  PendingApprovalPayload,
+  SessionDetail,
+  SessionEventPayload,
+  SessionSummary,
+  ToolCallPayload,
+} from './types';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
+type StreamState = 'idle' | 'connecting' | 'streaming' | 'closed' | 'error';
 
 const seedMetadata = { source: 'frontend-shell' };
+const terminalEventTypes = new Set(['turn_complete', 'approval_required', 'error', 'interrupted']);
 
 function formatTimestamp(value: string) {
   const date = new Date(value);
@@ -41,19 +58,52 @@ function statusTone(status: string) {
   return 'neutral';
 }
 
+function eventTitle(eventType: string) {
+  return eventType
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function eventSummary(event: SessionEventPayload) {
+  const content = event.data.content;
+  if (typeof content === 'string' && content.trim()) {
+    return content;
+  }
+
+  const output = event.data.output;
+  if (typeof output === 'string' && output.trim()) {
+    return output;
+  }
+
+  const error = event.data.error;
+  if (typeof error === 'string' && error.trim()) {
+    return error;
+  }
+
+  return JSON.stringify(event.data);
+}
+
 function App() {
   const apiLabel = useMemo(() => getApiBaseLabel(), []);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const lastEventSequenceRef = useRef<number>(-1);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [activeSession, setActiveSession] = useState<SessionDetail | null>(null);
   const [messages, setMessages] = useState<MessagePayload[]>([]);
+  const [liveEvents, setLiveEvents] = useState<SessionEventPayload[]>([]);
+  const [liveAssistantText, setLiveAssistantText] = useState('');
   const [state, setState] = useState<LoadState>('idle');
   const [sessionState, setSessionState] = useState<LoadState>('idle');
+  const [streamState, setStreamState] = useState<StreamState>('idle');
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [sending, setSending] = useState(false);
   const [draftTitle, setDraftTitle] = useState('');
   const [draftModel, setDraftModel] = useState('');
+  const [draftPrompt, setDraftPrompt] = useState('');
 
   useEffect(() => {
     void refreshSessions();
@@ -63,11 +113,59 @@ function App() {
     if (!selectedSessionId) {
       setActiveSession(null);
       setMessages([]);
+      setLiveEvents([]);
+      setLiveAssistantText('');
+      setStreamState('idle');
+      closeEventStream();
       return;
     }
 
+    lastEventSequenceRef.current = -1;
+    setLiveEvents([]);
+    setLiveAssistantText('');
     void refreshSession(selectedSessionId);
+    connectEventStream(selectedSessionId, { replay: true });
+
+    return () => closeEventStream();
   }, [selectedSessionId]);
+
+  function closeEventStream() {
+    eventSourceRef.current?.close();
+    eventSourceRef.current = null;
+  }
+
+  function connectEventStream(sessionId: string, options: { replay: boolean }) {
+    closeEventStream();
+    setStreamState('connecting');
+
+    const after = options.replay ? lastEventSequenceRef.current : undefined;
+    eventSourceRef.current = createSessionEventSource(sessionId, {
+      after,
+      onEvent: (event) => {
+        lastEventSequenceRef.current = Math.max(lastEventSequenceRef.current, event.sequence);
+        setStreamState('streaming');
+        setLiveEvents((current) => [...current.slice(-39), event]);
+
+        if (event.event_type === 'assistant_chunk') {
+          const content = event.data.content;
+          if (typeof content === 'string') {
+            setLiveAssistantText((current) => current + content);
+          }
+        }
+
+        if (terminalEventTypes.has(event.event_type)) {
+          closeEventStream();
+          setStreamState('closed');
+          void refreshSession(sessionId);
+          void refreshSessions();
+        }
+      },
+      onError: () => {
+        eventSourceRef.current = null;
+        setStreamState('error');
+      },
+    });
+  }
 
   async function refreshSessions() {
     setState('loading');
@@ -132,11 +230,51 @@ function App() {
       setSelectedSessionId(created.id);
       setDraftTitle('');
       setDraftModel('');
-      setNotice('Session created. Add a prompt in the backend or follow-up shell.');
+      setNotice('Session created. Send a prompt to start streaming agent activity.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to create session.');
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function handleSendPrompt(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedSessionId || !draftPrompt.trim() || sending) {
+      return;
+    }
+
+    const prompt = draftPrompt.trim();
+    setSending(true);
+    setError(null);
+    setNotice(null);
+    setDraftPrompt('');
+    setLiveAssistantText('');
+    setLiveEvents([]);
+    connectEventStream(selectedSessionId, { replay: false });
+
+    try {
+      const response = await sendChatMessage(selectedSessionId, { message: prompt });
+      setActiveSession(response.session);
+      setMessages(response.messages);
+      setLiveAssistantText('');
+      setSessions((current) =>
+        current.map((session) => (session.id === response.session.id ? response.session : session)),
+      );
+
+      if (response.result.status === 'approval_required') {
+        setNotice('The agent is waiting for approval. Approval controls are planned for the next dedicated task.');
+      } else if (response.result.status === 'interrupted') {
+        setNotice('The turn was interrupted.');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to send prompt.');
+      closeEventStream();
+      setStreamState('error');
+    } finally {
+      setSending(false);
+      void refreshSession(selectedSessionId);
+      void refreshSessions();
     }
   }
 
@@ -280,17 +418,37 @@ function App() {
                     </article>
                   ))
                 )}
+                {liveAssistantText ? (
+                  <article className="message assistant live">
+                    <div className="message-meta">
+                      <span>Assistant streaming</span>
+                      <span>live</span>
+                    </div>
+                    <p>{liveAssistantText}</p>
+                  </article>
+                ) : null}
               </div>
 
-              <div className="composer-shell">
+              <form className="composer-shell" onSubmit={handleSendPrompt}>
                 <label>
-                  Draft prompt
-                  <textarea placeholder="The next slice can wire this composer into /api/chat/{session_id}." rows={4} disabled />
+                  Prompt
+                  <textarea
+                    placeholder="Ask ML Copilot to inspect a repo, explain a failure, or plan the next experiment."
+                    rows={4}
+                    value={draftPrompt}
+                    onChange={(event) => setDraftPrompt(event.target.value)}
+                    disabled={sending}
+                  />
                 </label>
-                <button className="primary-button" type="button" disabled>
-                  Send later
-                </button>
-              </div>
+                <div className="composer-actions">
+                  <span className={`status-chip ${streamState === 'error' ? 'danger' : streamState === 'streaming' ? 'success' : 'neutral'}`}>
+                    stream: {streamState}
+                  </span>
+                  <button className="primary-button" type="submit" disabled={sending || !draftPrompt.trim()}>
+                    {sending ? 'Sending...' : 'Send prompt'}
+                  </button>
+                </div>
+              </form>
             </>
           ) : (
             <div className="empty-state hero">
@@ -317,6 +475,23 @@ function App() {
               <p className="muted">
                 The shell falls back to a clean empty state if the backend is not available.
               </p>
+            </section>
+
+            <section className="info-card">
+              <h3>Live stream</h3>
+              {liveEvents.length === 0 ? (
+                <p className="muted">SSE events will appear here while the active session runs.</p>
+              ) : (
+                liveEvents.slice(-8).map((event) => (
+                  <div key={event.id} className="event-card">
+                    <div className="mini-row">
+                      <strong>{eventTitle(event.event_type)}</strong>
+                      <span>#{event.sequence}</span>
+                    </div>
+                    <p>{eventSummary(event)}</p>
+                  </div>
+                ))
+              )}
             </section>
 
             <section className="info-card">
