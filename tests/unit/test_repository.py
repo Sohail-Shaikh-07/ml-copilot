@@ -17,6 +17,7 @@ def test_initialize_creates_expected_tables(tmp_path: Path) -> None:
         "tool_calls",
         "approvals",
         "eval_runs",
+        "turn_metrics",
     }.issubset(table_names)
 
 
@@ -227,6 +228,67 @@ def test_eval_run_lifecycle(tmp_path: Path) -> None:
     assert repository.get_eval_run("eval-1") == updated
     assert repository.list_eval_runs("fixture-1") == [updated]
     assert repository.list_eval_runs("missing") == []
+
+
+def test_turn_metrics_summary_aggregates_turn_data(tmp_path: Path) -> None:
+    repository = SQLiteRepository(tmp_path / "ml-copilot.db")
+    repository.initialize()
+    repository.create_session(
+        session_id="session-1",
+        title="Metrics",
+        model="gpt-5.4",
+    )
+    repository.add_turn_metrics(
+        session_id="session-1",
+        turn_id="turn-1",
+        status="complete",
+        iterations=2,
+        prompt_tokens=100,
+        completion_tokens=40,
+        total_tokens=140,
+        estimated_cost_usd=0.42,
+        tool_calls=3,
+        tool_errors=1,
+        tool_retries=1,
+        tool_latency_ms=250.5,
+        error_count=1,
+        started_at="2026-06-15T00:00:00+00:00",
+        finished_at="2026-06-15T00:00:03+00:00",
+        metric_id="metric-1",
+    )
+    repository.add_turn_metrics(
+        session_id="session-1",
+        turn_id="turn-2",
+        status="approval_required",
+        iterations=1,
+        prompt_tokens=60,
+        completion_tokens=12,
+        total_tokens=72,
+        estimated_cost_usd=0.18,
+        tool_calls=1,
+        tool_errors=0,
+        tool_retries=0,
+        tool_latency_ms=75.0,
+        error_count=0,
+        started_at="2026-06-15T00:01:00+00:00",
+        finished_at="2026-06-15T00:01:02+00:00",
+        metric_id="metric-2",
+    )
+
+    metrics = repository.get_session_metrics_summary("session-1")
+
+    assert metrics.turn_count == 2
+    assert metrics.prompt_tokens == 160
+    assert metrics.completion_tokens == 52
+    assert metrics.total_tokens == 212
+    assert metrics.estimated_cost_usd == 0.6
+    assert metrics.tool_calls == 4
+    assert metrics.tool_errors == 1
+    assert metrics.tool_retries == 1
+    assert metrics.tool_latency_ms == 325.5
+    assert metrics.average_tool_latency_ms == 81.38
+    assert metrics.error_count == 1
+    assert metrics.last_updated_at == "2026-06-15T00:01:02+00:00"
 
 
 def test_next_sequences_advance_with_history(tmp_path: Path) -> None:

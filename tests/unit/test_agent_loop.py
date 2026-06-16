@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from app.agent.llm import LLMResponse, ToolCall
+from app.agent.llm import LLMResponse, ToolCall, Usage
 from app.agent.loop import AgentLoop, _create_tool_registry
 from app.config import AppPaths, AppSettings
 from app.storage.repository import SQLiteRepository
@@ -59,6 +59,39 @@ def test_tool_registry_includes_paper_details(tmp_path: Path) -> None:
 
     assert registry.get("paper_details").name == "paper_details"
     assert registry.get("analyze_ml_repo").name == "analyze_ml_repo"
+
+
+@pytest.mark.asyncio
+async def test_run_turn_records_session_metrics(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+    session = repository.create_session(session_id="session-1", title="Metrics", model="gpt-5.4")
+    llm = DummyLLM(
+        responses=[
+            LLMResponse(
+                model="gpt-5.4",
+                content="Metrics captured.",
+                finish_reason="stop",
+                usage=Usage(prompt_tokens=100, completion_tokens=40, total_tokens=140),
+            )
+        ]
+    )
+    loop = AgentLoop(
+        llm_client=llm,
+        tool_registry=_registry("unused", []),
+        repository=repository,
+        settings=_settings(tmp_path),
+    )
+
+    result = await loop.run_turn(session, "Measure this turn")
+    metrics = repository.get_session_metrics_summary(session.id)
+
+    assert result["status"] == "complete"
+    assert metrics.turn_count == 1
+    assert metrics.prompt_tokens == 100
+    assert metrics.completion_tokens == 40
+    assert metrics.total_tokens == 140
+    assert metrics.tool_calls == 0
+    assert metrics.estimated_cost_usd == 0.00039
 
 
 @pytest.mark.asyncio

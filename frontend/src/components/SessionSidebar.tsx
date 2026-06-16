@@ -41,6 +41,14 @@ function formatPreview(message: MessagePayload) {
   return `${trimmed.slice(0, 93)}...`;
 }
 
+function formatCompact(value: number) {
+  return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 4 }).format(value);
+}
+
 function roleLabel(role: string) {
   if (role === 'assistant') return 'Assistant';
   if (role === 'user') return 'User';
@@ -153,6 +161,9 @@ export default function SessionSidebar({
               <div className="session-card-meta">
                 <span>{currentSession.message_count} messages</span>
                 <span>{currentSession.event_count} events</span>
+                <span>{currentSession.metrics.turn_count} turns</span>
+                <span>{formatCompact(currentSession.metrics.total_tokens)} tokens</span>
+                <span>{formatCurrency(currentSession.metrics.estimated_cost_usd)}</span>
                 <span>Updated {formatTimestamp(currentSession.updated_at)}</span>
               </div>
             </div>

@@ -9,18 +9,19 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.agent.llm import LLMResponse, ToolCall
+from app.agent.llm import LLMResponse, ToolCall, Usage
 from app.api import create_app
 from app.config import AppSettings
 from app.storage.repository import SQLiteRepository
 
 
 class FakeLLMClient:
-    def __init__(self, content: str = "Working on it.") -> None:
+    def __init__(self, content: str = "Working on it.", usage: Usage | None = None) -> None:
         self._content = content
+        self._usage = usage
 
     async def chat(self, **kwargs) -> LLMResponse:
-        return LLMResponse(model="gpt-test", content=self._content)
+        return LLMResponse(model="gpt-test", content=self._content, usage=self._usage)
 
 
 class BlockingLLMClient:
@@ -97,7 +98,10 @@ def test_chat_route_persists_messages_and_session_state(tmp_path: Path) -> None:
         return create_agent_loop(
             app_settings,
             repository=repository,
-            llm_client=FakeLLMClient(content="Repository summary ready."),
+            llm_client=FakeLLMClient(
+                content="Repository summary ready.",
+                usage=Usage(prompt_tokens=1000, completion_tokens=500, total_tokens=1500),
+            ),
         )
 
     app = create_app(settings, loop_factory=loop_factory)
@@ -118,6 +122,9 @@ def test_chat_route_persists_messages_and_session_state(tmp_path: Path) -> None:
     assert body["result"]["status"] == "complete"
     assert body["result"]["content"] == "Repository summary ready."
     assert body["session"]["status"] == "idle"
+    assert body["session"]["metrics"]["turn_count"] == 1
+    assert body["session"]["metrics"]["total_tokens"] == 1500
+    assert body["session"]["metrics"]["estimated_cost_usd"] == 0.0045
     assert [message["role"] for message in body["messages"]] == ["user", "assistant"]
 
     assert messages.status_code == 200
@@ -129,6 +136,7 @@ def test_chat_route_persists_messages_and_session_state(tmp_path: Path) -> None:
     assert session.status_code == 200
     assert session.json()["message_count"] == 2
     assert session.json()["event_count"] >= 3
+    assert session.json()["metrics"]["tool_calls"] == 0
 
 
 def test_missing_session_returns_404(tmp_path: Path) -> None:

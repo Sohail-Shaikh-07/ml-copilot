@@ -11,7 +11,15 @@ from fastapi.responses import StreamingResponse
 
 from app.agent.loop import AgentLoop, create_agent_loop
 from app.config import AppSettings
-from app.storage.models import MessageRecord, PendingApprovalRecord, SessionRecord, ToolCallRecord
+from app.storage.models import (
+    MessageRecord,
+    PendingApprovalRecord,
+    SessionRecord,
+    ToolCallRecord,
+)
+from app.storage.models import (
+    SessionMetricsSummary as SessionMetricsRecord,
+)
 from app.storage.repository import SQLiteRepository
 
 from .runtime import ActiveTurnManager
@@ -24,6 +32,7 @@ from .schemas import (
     MessagePayload,
     PendingApprovalPayload,
     SessionDetail,
+    SessionMetricsSummary,
     SessionSummary,
     ToolCallPayload,
     TurnResultPayload,
@@ -279,6 +288,7 @@ def _get_session_or_404(repo: SQLiteRepository, session_id: str) -> SessionRecor
 
 
 def _serialize_session_summary(repo: SQLiteRepository, session: SessionRecord) -> SessionSummary:
+    metrics = _serialize_session_metrics(repo.get_session_metrics_summary(session.id))
     return SessionSummary(
         id=session.id,
         title=session.title,
@@ -290,6 +300,7 @@ def _serialize_session_summary(repo: SQLiteRepository, session: SessionRecord) -
         message_count=len(repo.list_messages(session.id)),
         event_count=len(repo.list_events(session.id)),
         pending_approval_count=len(repo.list_pending_approvals(session.id)),
+        metrics=metrics,
     )
 
 
@@ -299,6 +310,24 @@ def _serialize_session_detail(repo: SQLiteRepository, session: SessionRecord) ->
         **summary.model_dump(),
         pending_approvals=[_serialize_pending_approval(item) for item in repo.list_pending_approvals(session.id)],
         tool_calls=[_serialize_tool_call(tool_call) for tool_call in repo.list_tool_calls(session.id)],
+    )
+
+
+def _serialize_session_metrics(record: SessionMetricsRecord) -> SessionMetricsSummary:
+    return SessionMetricsSummary(
+        session_id=record.session_id,
+        turn_count=record.turn_count,
+        prompt_tokens=record.prompt_tokens,
+        completion_tokens=record.completion_tokens,
+        total_tokens=record.total_tokens,
+        estimated_cost_usd=record.estimated_cost_usd,
+        tool_calls=record.tool_calls,
+        tool_errors=record.tool_errors,
+        tool_retries=record.tool_retries,
+        tool_latency_ms=record.tool_latency_ms,
+        average_tool_latency_ms=record.average_tool_latency_ms,
+        error_count=record.error_count,
+        last_updated_at=record.last_updated_at,
     )
 
 

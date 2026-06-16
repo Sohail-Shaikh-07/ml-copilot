@@ -45,6 +45,21 @@ function titleForSession(session: SessionSummary | SessionDetail) {
   return session.title?.trim() || 'Untitled session';
 }
 
+function formatCompact(value: number) {
+  return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 4 }).format(value);
+}
+
+function formatLatency(value: number) {
+  if (value < 1000) {
+    return `${Math.round(value)}ms`;
+  }
+  return `${(value / 1000).toFixed(2)}s`;
+}
+
 function roleLabel(role: string) {
   if (role === 'assistant') return 'Assistant';
   if (role === 'user') return 'User';
@@ -296,6 +311,12 @@ function App() {
     ? [
         { label: 'Messages', value: activeSession.message_count },
         { label: 'Events', value: activeSession.event_count },
+        { label: 'Turns', value: activeSession.metrics.turn_count },
+        { label: 'Tokens', value: formatCompact(activeSession.metrics.total_tokens) },
+        { label: 'Est. cost', value: formatCurrency(activeSession.metrics.estimated_cost_usd) },
+        { label: 'Tool latency', value: formatLatency(activeSession.metrics.tool_latency_ms) },
+        { label: 'Tool errors', value: activeSession.metrics.tool_errors },
+        { label: 'Retries', value: activeSession.metrics.tool_retries },
         { label: 'Approvals', value: activeSession.pending_approval_count },
       ]
     : [];
@@ -448,7 +469,12 @@ function App() {
               onResolve={handleResolveApproval}
             />
 
-            <ToolTracePanel liveEvents={liveEvents} pendingApprovals={pendingApprovals} toolCalls={toolCalls} />
+            <ToolTracePanel
+              liveEvents={liveEvents}
+              metrics={activeSession?.metrics ?? null}
+              pendingApprovals={pendingApprovals}
+              toolCalls={toolCalls}
+            />
           </div>
         </aside>
       </main>

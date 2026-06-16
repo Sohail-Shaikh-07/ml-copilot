@@ -64,6 +64,44 @@ class ToolCallRecord:
 
 
 @dataclass(frozen=True)
+class TurnMetricsRecord:
+    id: str
+    session_id: str
+    turn_id: str
+    status: str
+    iterations: int
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    estimated_cost_usd: float
+    tool_calls: int
+    tool_errors: int
+    tool_retries: int
+    tool_latency_ms: float
+    error_count: int
+    started_at: str
+    finished_at: str
+    created_at: str
+
+
+@dataclass(frozen=True)
+class SessionMetricsSummary:
+    session_id: str
+    turn_count: int
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    estimated_cost_usd: float
+    tool_calls: int
+    tool_errors: int
+    tool_retries: int
+    tool_latency_ms: float
+    average_tool_latency_ms: float
+    error_count: int
+    last_updated_at: str | None
+
+
+@dataclass(frozen=True)
 class ApprovalRecord:
     id: str
     session_id: str

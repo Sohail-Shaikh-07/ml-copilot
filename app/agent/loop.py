@@ -6,10 +6,11 @@ import asyncio
 import json
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from time import perf_counter
 from typing import Any, Callable
 
-from app.agent.llm import LLMClient
+from app.agent.llm import LLMClient, Usage
 from app.config import AppSettings
 from app.storage.models import MessageRecord, PendingApprovalRecord, SessionRecord
 from app.storage.repository import SQLiteRepository
@@ -77,6 +78,48 @@ class TurnContext:
     messages: list[dict[str, Any]]
     event_sequence: int
     message_sequence: int
+
+
+@dataclass
+class TurnMetricsAccumulator:
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    tool_calls: int = 0
+    tool_errors: int = 0
+    tool_retries: int = 0
+    tool_latency_ms: float = 0.0
+    error_count: int = 0
+    seen_fingerprints: set[str] = field(default_factory=set)
+
+    def record_usage(self, usage: Usage) -> None:
+        self.prompt_tokens += max(0, usage.prompt_tokens)
+        self.completion_tokens += max(0, usage.completion_tokens)
+        self.total_tokens += max(0, usage.total_tokens or usage.prompt_tokens + usage.completion_tokens)
+
+    def record_tool_call(self, tool_name: str, arguments: dict[str, Any]) -> None:
+        self.tool_calls += 1
+        fingerprint = f"{tool_name}:{json.dumps(arguments, sort_keys=True, separators=(',', ':'))}"
+        if fingerprint in self.seen_fingerprints:
+            self.tool_retries += 1
+        else:
+            self.seen_fingerprints.add(fingerprint)
+
+    def record_tool_error(self) -> None:
+        self.tool_errors += 1
+        self.error_count += 1
+
+    def record_failure(self) -> None:
+        self.error_count += 1
+
+    def record_tool_latency(self, elapsed_ms: float) -> None:
+        self.tool_latency_ms += max(0.0, elapsed_ms)
+
+
+def _estimate_turn_cost_usd(settings: AppSettings, metrics: TurnMetricsAccumulator) -> float:
+    prompt_cost = metrics.prompt_tokens * settings.usage.prompt_cost_per_1k_tokens_usd / 1000.0
+    completion_cost = metrics.completion_tokens * settings.usage.completion_cost_per_1k_tokens_usd / 1000.0
+    return round(prompt_cost + completion_cost, 6)
 
 
 class AgentLoop:
@@ -242,10 +285,20 @@ class AgentLoop:
     ) -> dict[str, Any]:
         tool_specs = self.tools.openai_tools()
         iterations = 0
+        turn_started_at = _utc_now()
+        metrics = TurnMetricsAccumulator()
 
         while iterations < MAX_ITERATIONS:
             if self._interrupted:
                 await self.emit_event(ctx, EventType.INTERRUPTED, {})
+                await self._record_turn_metrics(
+                    session=session,
+                    turn_id=ctx.turn_id,
+                    metrics=metrics,
+                    status="interrupted",
+                    iterations=iterations,
+                    started_at=turn_started_at,
+                )
                 return {"status": "interrupted", "iterations": iterations}
 
             iterations += 1
@@ -257,12 +310,34 @@ class AgentLoop:
                     tool_choice="auto" if tool_specs else None,
                     stream=True,
                 )
+            except asyncio.CancelledError:
+                await self.emit_event(ctx, EventType.INTERRUPTED, {"message": "Turn interrupted."})
+                await self._record_turn_metrics(
+                    session=session,
+                    turn_id=ctx.turn_id,
+                    metrics=metrics,
+                    status="interrupted",
+                    iterations=iterations,
+                    started_at=turn_started_at,
+                )
+                raise
             except Exception as exc:
+                metrics.record_failure()
                 await self.emit_event(ctx, EventType.ERROR, {"error": str(exc)})
+                await self._record_turn_metrics(
+                    session=session,
+                    turn_id=ctx.turn_id,
+                    metrics=metrics,
+                    status="error",
+                    iterations=iterations,
+                    started_at=turn_started_at,
+                )
                 raise
 
             full_content = response.content
             tool_calls = response.tool_calls
+            if response.usage is not None:
+                metrics.record_usage(response.usage)
 
             if full_content:
                 await self.emit_event(
@@ -301,12 +376,21 @@ class AgentLoop:
             if not tool_calls:
                 await self.emit_event(ctx, EventType.ASSISTANT_MESSAGE, {"content": full_content or ""})
                 await self.emit_event(ctx, EventType.TURN_COMPLETE, {"iterations": iterations})
+                await self._record_turn_metrics(
+                    session=session,
+                    turn_id=ctx.turn_id,
+                    metrics=metrics,
+                    status="complete",
+                    iterations=iterations,
+                    started_at=turn_started_at,
+                )
                 return {"status": "complete", "content": full_content, "iterations": iterations}
 
             pending_payloads: list[dict[str, Any]] = []
             approval_ids: list[str] = []
 
             for tool_call in tool_calls:
+                metrics.record_tool_call(tool_call.name, {"__raw_arguments__": tool_call.arguments})
                 await self.emit_event(
                     ctx,
                     EventType.TOOL_CALL,
@@ -321,6 +405,7 @@ class AgentLoop:
                     arguments = tool_call.arguments_as_json()
                 except Exception as exc:
                     error_message = f"Tool execution error: {exc}"
+                    metrics.record_tool_error()
                     self.repo.add_tool_call(
                         session_id=ctx.session_id,
                         turn_id=ctx.turn_id,
@@ -380,6 +465,7 @@ class AgentLoop:
                     tool_call_id=tool_call.id,
                     tool_name=tool_call.name,
                     arguments=arguments,
+                    metrics=metrics,
                 )
 
             if pending_payloads:
@@ -387,6 +473,14 @@ class AgentLoop:
                     ctx,
                     EventType.APPROVAL_REQUIRED,
                     {"tools": pending_payloads, "count": len(pending_payloads)},
+                )
+                await self._record_turn_metrics(
+                    session=session,
+                    turn_id=ctx.turn_id,
+                    metrics=metrics,
+                    status="approval_required",
+                    iterations=iterations,
+                    started_at=turn_started_at,
                 )
                 return {
                     "status": "approval_required",
@@ -396,6 +490,14 @@ class AgentLoop:
                 }
 
         await self.emit_event(ctx, EventType.TURN_COMPLETE, {"iterations": iterations, "max_reached": True})
+        await self._record_turn_metrics(
+            session=session,
+            turn_id=ctx.turn_id,
+            metrics=metrics,
+            status="max_iterations",
+            iterations=iterations,
+            started_at=turn_started_at,
+        )
         return {"status": "max_iterations", "iterations": iterations}
 
     async def _execute_tool_call(
@@ -405,6 +507,7 @@ class AgentLoop:
         tool_call_id: str,
         tool_name: str,
         arguments: dict[str, Any],
+        metrics: TurnMetricsAccumulator | None = None,
     ) -> None:
         now = _utc_now()
         existing = self.repo.get_tool_call(tool_call_id)
@@ -428,11 +531,15 @@ class AgentLoop:
                 error=None,
             )
 
+        start = perf_counter()
         try:
             tool_output = await self.tools.call(tool_name, arguments)
             success = True
             error = None
         except asyncio.CancelledError:
+            if metrics is not None:
+                metrics.record_tool_error()
+                metrics.record_tool_latency((perf_counter() - start) * 1000.0)
             tool_output = "Tool execution interrupted."
             self.repo.update_tool_call(
                 tool_call_id,
@@ -452,10 +559,14 @@ class AgentLoop:
             )
             raise
         except Exception as exc:
+            if metrics is not None:
+                metrics.record_tool_error()
             tool_output = f"Tool execution error: {exc}"
             success = False
             error = str(exc)
 
+        if metrics is not None:
+            metrics.record_tool_latency((perf_counter() - start) * 1000.0)
         self.repo.update_tool_call(
             tool_call_id,
             status="completed" if success else "failed",
@@ -471,6 +582,35 @@ class AgentLoop:
             tool_name=tool_name,
             output=tool_output,
             success=success,
+        )
+
+    async def _record_turn_metrics(
+        self,
+        *,
+        session: SessionRecord,
+        turn_id: str,
+        metrics: TurnMetricsAccumulator,
+        status: str,
+        iterations: int,
+        started_at: str,
+    ) -> None:
+        finished_at = _utc_now()
+        self.repo.add_turn_metrics(
+            session_id=session.id,
+            turn_id=turn_id,
+            status=status,
+            iterations=iterations,
+            prompt_tokens=metrics.prompt_tokens,
+            completion_tokens=metrics.completion_tokens,
+            total_tokens=metrics.total_tokens,
+            estimated_cost_usd=_estimate_turn_cost_usd(self.settings, metrics),
+            tool_calls=metrics.tool_calls,
+            tool_errors=metrics.tool_errors,
+            tool_retries=metrics.tool_retries,
+            tool_latency_ms=round(metrics.tool_latency_ms, 2),
+            error_count=metrics.error_count,
+            started_at=started_at,
+            finished_at=finished_at,
         )
 
     async def _record_tool_output(
