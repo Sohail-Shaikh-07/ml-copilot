@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
+import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -102,9 +104,12 @@ class EvalRunner:
         error: str | None = None
         agent_output: dict[str, Any] = {}
         check_results: list[EvalCheckResult] = []
+        workspace_before: dict[str, str] = {}
+        runtime_start = time.perf_counter()
 
         try:
             workspace_path = self._prepare_workspace(fixture, eval_output_dir, record.id)
+            workspace_before = snapshot_workspace(workspace_path)
             eval_settings = replace(
                 self.settings,
                 paths=AppPaths.from_workspace_root(workspace_path),
@@ -119,6 +124,8 @@ class EvalRunner:
             error = str(exc)
 
         finished_at = utc_now()
+        runtime_seconds = round(time.perf_counter() - runtime_start, 4)
+        workspace_after = snapshot_workspace(workspace_path) if workspace_path.exists() else {}
         report = build_report(
             fixture=fixture,
             eval_run_id=record.id,
@@ -131,6 +138,9 @@ class EvalRunner:
             artifact_dir=artifact_dir,
             agent_output=agent_output,
             check_results=check_results,
+            file_changes=diff_workspace_snapshots(workspace_before, workspace_after),
+            safety_events=summarize_safety_events(self.repository, session.id),
+            runtime_seconds=runtime_seconds,
             error=error,
         )
         report_path = artifact_dir / "report.json"
@@ -264,8 +274,28 @@ def build_report(
     artifact_dir: Path,
     agent_output: dict[str, Any],
     check_results: list[EvalCheckResult],
+    file_changes: dict[str, Any],
+    safety_events: dict[str, Any],
+    runtime_seconds: float,
     error: str | None,
 ) -> dict[str, Any]:
+    checks_total = len(check_results)
+    checks_passed = sum(1 for result in check_results if result.passed)
+    token_usage = extract_token_usage(agent_output)
+    scoring = {
+        "task_success": status == "passed",
+        "tests_passed": checks_passed,
+        "tests_total": checks_total,
+        "files_changed": file_changes["files_changed"],
+        "file_changes": file_changes,
+        "safety_events": safety_events,
+        "token_usage": token_usage,
+        "runtime": {
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "seconds": runtime_seconds,
+        },
+    }
     return {
         "id": eval_run_id,
         "fixture": {
@@ -281,6 +311,7 @@ def build_report(
         "workspace_path": str(workspace_path),
         "artifact_dir": str(artifact_dir),
         "agent_output": _json_safe(agent_output),
+        "scoring": scoring,
         "checks": [
             {
                 "type": result.kind,
@@ -298,17 +329,42 @@ def build_report(
 
 def format_markdown_report(report: dict[str, Any]) -> str:
     fixture = report["fixture"]
+    scoring = report.get("scoring") or {}
+    runtime = scoring.get("runtime") or {}
+    token_usage = scoring.get("token_usage") or {}
+    safety_events = scoring.get("safety_events") or {}
     lines = [
         f"# Eval Report: {fixture['id']}",
         "",
         f"- Status: `{report['status']}`",
         f"- Score: `{report['score']}`",
+        f"- Task success: `{scoring.get('task_success', report['status'] == 'passed')}`",
+        f"- Tests passed: `{scoring.get('tests_passed', 0)}/{scoring.get('tests_total', 0)}`",
+        f"- Runtime: `{runtime.get('seconds', 0)}` seconds",
+        f"- Tokens: `{token_usage.get('total_tokens', 0)}` total",
         f"- Session: `{report['session_id']}`",
         f"- Workspace: `{report['workspace_path']}`",
         f"- Artifacts: `{report['artifact_dir']}`",
         "",
-        "## Checks",
+        "## Changed Files",
     ]
+    for file_path in scoring.get("files_changed") or []:
+        lines.append(f"- `{file_path}`")
+    if not scoring.get("files_changed"):
+        lines.append("- None")
+
+    lines.extend(
+        [
+            "",
+            "## Safety Events",
+            f"- Approval required: `{safety_events.get('approval_required_count', 0)}`",
+            f"- Approval resolved: `{safety_events.get('approval_resolved_count', 0)}`",
+            f"- Errors: `{safety_events.get('error_count', 0)}`",
+            f"- Interruptions: `{safety_events.get('interrupted_count', 0)}`",
+            "",
+            "## Checks",
+        ]
+    )
     for check in report["checks"]:
         mark = "PASS" if check["passed"] else "FAIL"
         label = check["path"] or check["value"] or check["type"]
@@ -317,6 +373,88 @@ def format_markdown_report(report: dict[str, Any]) -> str:
         lines.extend(["", "## Error", str(report["error"])])
     lines.append("")
     return "\n".join(lines)
+
+
+def snapshot_workspace(workspace_path: Path) -> dict[str, str]:
+    if not workspace_path.exists():
+        return {}
+
+    snapshot: dict[str, str] = {}
+    for path in sorted(item for item in workspace_path.rglob("*") if item.is_file()):
+        relative_path = path.relative_to(workspace_path).as_posix()
+        snapshot[relative_path] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return snapshot
+
+
+def diff_workspace_snapshots(before: dict[str, str], after: dict[str, str]) -> dict[str, Any]:
+    created = sorted(path for path in after if path not in before)
+    modified = sorted(path for path in after if path in before and after[path] != before[path])
+    deleted = sorted(path for path in before if path not in after)
+    return {
+        "created": created,
+        "modified": modified,
+        "deleted": deleted,
+        "files_changed": sorted({*created, *modified, *deleted}),
+    }
+
+
+def summarize_safety_events(repository: SQLiteRepository, session_id: str) -> dict[str, Any]:
+    events = repository.list_events(session_id)
+    tool_calls = repository.list_tool_calls(session_id)
+    safety_event_types = {"approval_required", "approval_resolved", "error", "interrupted"}
+    safety_events = [
+        {
+            "type": event.event_type,
+            "sequence": event.sequence,
+            "data": _json_safe(json.loads(event.data_json)),
+        }
+        for event in events
+        if event.event_type in safety_event_types
+    ]
+    approval_tool_calls = [
+        {
+            "id": tool_call.id,
+            "tool_name": tool_call.tool_name,
+            "status": tool_call.status,
+            "requires_approval": tool_call.requires_approval,
+        }
+        for tool_call in tool_calls
+        if tool_call.requires_approval
+    ]
+    return {
+        "approval_required_count": sum(1 for event in safety_events if event["type"] == "approval_required"),
+        "approval_resolved_count": sum(1 for event in safety_events if event["type"] == "approval_resolved"),
+        "error_count": sum(1 for event in safety_events if event["type"] == "error"),
+        "interrupted_count": sum(1 for event in safety_events if event["type"] == "interrupted"),
+        "events": safety_events,
+        "approval_tool_calls": approval_tool_calls,
+    }
+
+
+def extract_token_usage(agent_output: dict[str, Any]) -> dict[str, int]:
+    usage = agent_output.get("usage")
+    if not isinstance(usage, dict):
+        result = agent_output.get("result")
+        usage = result.get("usage") if isinstance(result, dict) else None
+
+    if not isinstance(usage, dict):
+        return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+    prompt_tokens = _int_or_zero(usage.get("prompt_tokens"))
+    completion_tokens = _int_or_zero(usage.get("completion_tokens"))
+    total_tokens = _int_or_zero(usage.get("total_tokens")) or prompt_tokens + completion_tokens
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+    }
+
+
+def _int_or_zero(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _parse_files(raw_files: Any) -> list[EvalFile]:
