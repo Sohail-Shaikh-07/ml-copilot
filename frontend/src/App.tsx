@@ -6,10 +6,13 @@ import {
   fetchSession,
   fetchSessions,
   getApiBaseLabel,
+  resolveApproval,
   sendChatMessage,
 } from './api';
+import ApprovalDialog from './components/ApprovalDialog';
 import ToolTracePanel from './components/ToolTracePanel';
 import type {
+  ApprovalDecisionRequest,
   MessagePayload,
   PendingApprovalPayload,
   SessionDetail,
@@ -76,6 +79,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [sending, setSending] = useState(false);
+  const [resolvingApproval, setResolvingApproval] = useState(false);
   const [draftTitle, setDraftTitle] = useState('');
   const [draftModel, setDraftModel] = useState('');
   const [draftPrompt, setDraftPrompt] = useState('');
@@ -238,7 +242,7 @@ function App() {
       );
 
       if (response.result.status === 'approval_required') {
-        setNotice('The agent is waiting for approval. Approval controls are planned for the next dedicated task.');
+        setNotice('The agent is waiting for approval. Review the pending action in the approval dialog.');
       } else if (response.result.status === 'interrupted') {
         setNotice('The turn was interrupted.');
       }
@@ -248,6 +252,44 @@ function App() {
       setStreamState('error');
     } finally {
       setSending(false);
+      void refreshSession(selectedSessionId);
+      void refreshSessions();
+    }
+  }
+
+  async function handleResolveApproval(approvalId: string, payload: ApprovalDecisionRequest) {
+    if (!selectedSessionId || resolvingApproval) {
+      return;
+    }
+
+    setResolvingApproval(true);
+    setError(null);
+    setNotice(null);
+    setLiveEvents([]);
+    setLiveAssistantText('');
+    connectEventStream(selectedSessionId, { replay: false });
+
+    try {
+      const response = await resolveApproval(selectedSessionId, approvalId, payload);
+      setActiveSession(response.session);
+      setMessages(response.messages);
+      setSessions((current) =>
+        current.map((session) => (session.id === response.session.id ? response.session : session)),
+      );
+
+      if (response.result.status === 'approval_required') {
+        setNotice('One approval was resolved. Another pending approval still needs review.');
+      } else if (response.result.status === 'interrupted') {
+        setNotice('The approval continuation was interrupted.');
+      } else {
+        setNotice('Approval decision applied.');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to resolve approval.');
+      closeEventStream();
+      setStreamState('error');
+    } finally {
+      setResolvingApproval(false);
       void refreshSession(selectedSessionId);
       void refreshSessions();
     }
@@ -452,19 +494,11 @@ function App() {
               </p>
             </section>
 
-            <section className="info-card">
-              <h3>Pending approvals</h3>
-              {pendingApprovals.length === 0 ? (
-                <p className="muted">None right now.</p>
-              ) : (
-                pendingApprovals.map((approval) => (
-                  <div key={approval.approval_id} className="mini-row">
-                    <strong>{approval.tool_name}</strong>
-                    <span>{shortId(approval.approval_id)}</span>
-                  </div>
-                ))
-              )}
-            </section>
+            <ApprovalDialog
+              pendingApprovals={pendingApprovals}
+              resolving={resolvingApproval}
+              onResolve={handleResolveApproval}
+            />
 
             <ToolTracePanel liveEvents={liveEvents} pendingApprovals={pendingApprovals} toolCalls={toolCalls} />
           </div>

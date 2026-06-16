@@ -158,6 +158,11 @@ button {
   border-color: rgba(251, 113, 133, 0.35);
 }
 
+.status-chip.warning {
+  color: #fde68a;
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
 .status-chip.neutral {
   color: #bfdbfe;
   border-color: rgba(56, 189, 248, 0.28);
@@ -436,6 +441,135 @@ button {
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
+}
+
+.approval-dialog {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 20px;
+  background:
+    linear-gradient(135deg, rgba(245, 158, 11, 0.1), transparent 42%),
+    rgba(8, 15, 28, 0.9);
+}
+
+.approval-empty {
+  border-color: var(--border);
+  background: rgba(8, 15, 28, 0.88);
+}
+
+.approval-dialog-header,
+.approval-section-label,
+.approval-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.approval-dialog h3 {
+  margin: 4px 0 0;
+  letter-spacing: -0.03em;
+}
+
+.approval-tabs {
+  display: grid;
+  gap: 8px;
+}
+
+.approval-tabs button {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: rgba(3, 7, 18, 0.54);
+  color: var(--muted);
+  text-align: left;
+}
+
+.approval-tabs button.active {
+  border-color: rgba(245, 158, 11, 0.42);
+  color: var(--text);
+}
+
+.approval-section-label {
+  align-items: center;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.approval-section-label span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approval-payload pre,
+.approval-edit-field textarea,
+.approval-feedback-field textarea {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 16px;
+  background: rgba(2, 6, 23, 0.68);
+  color: var(--text);
+  font-family: "JetBrains Mono", "Cascadia Code", monospace;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.approval-payload pre {
+  max-height: 170px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.approval-edit-field,
+.approval-feedback-field {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.approval-edit-field textarea,
+.approval-feedback-field textarea {
+  resize: vertical;
+  padding: 12px;
+  outline: none;
+}
+
+.approval-edit-field textarea:focus,
+.approval-feedback-field textarea:focus {
+  border-color: rgba(245, 158, 11, 0.42);
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
+}
+
+.approval-feedback-field textarea {
+  font-family: inherit;
+}
+
+.approval-error {
+  margin: 0;
+  color: #fecdd3;
+  font-size: 0.82rem;
+}
+
+.approval-actions {
+  flex-wrap: wrap;
+}
+
+.approval-actions button {
+  flex: 1 1 120px;
+}
+
+.danger-action {
+  color: #fecdd3;
+  border-color: rgba(251, 113, 133, 0.28);
 }
 
 .tool-trace-panel {

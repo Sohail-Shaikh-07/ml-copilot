@@ -371,6 +371,84 @@ def test_approval_flow_replays_terminal_events_after_reconnect(
     )
 
 
+def test_approval_route_resumes_loop_with_edited_arguments(tmp_path: Path, monkeypatch) -> None:
+    settings = _settings(tmp_path)
+    repository = SQLiteRepository(settings.db_path)
+    repository.initialize()
+    llm = ApprovalFlowLLMClient(final_content="Edited command finished.")
+
+    async def run_command_handler(args: dict[str, object], _settings: AppSettings) -> str:
+        return f"command executed: {args['command']}"
+
+    monkeypatch.setattr("app.tools.workspace.run_command_handler", run_command_handler)
+
+    def repository_factory(_: AppSettings) -> SQLiteRepository:
+        return repository
+
+    def loop_factory(app_settings: AppSettings, repo: SQLiteRepository):
+        from app.agent.loop import create_agent_loop
+
+        return create_agent_loop(
+            app_settings,
+            repository=repo,
+            llm_client=llm,
+        )
+
+    app = create_app(
+        settings,
+        repository_factory=repository_factory,
+        loop_factory=loop_factory,
+    )
+    client = TestClient(app)
+
+    created = client.post("/api/session", json={"title": "Approval API"})
+    session_id = created.json()["id"]
+    chat_response = client.post(
+        f"/api/chat/{session_id}",
+        json={"message": "Please run the command"},
+    )
+    approval_id = chat_response.json()["result"]["approval_ids"][0]
+
+    response = client.post(
+        f"/api/approval/{session_id}/{approval_id}",
+        json={
+            "approved": True,
+            "user_feedback": "use the focused test target",
+            "edited_arguments": {"command": "pytest tests/unit/test_api.py -q"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["result"]["status"] == "complete"
+    assert body["result"]["resolved_approval_id"] is None
+    assert body["session"]["status"] == "idle"
+    assert body["session"]["pending_approval_count"] == 0
+    assert body["messages"][2]["content"] == "command executed: pytest tests/unit/test_api.py -q"
+
+    approval = repository.get_approval(approval_id)
+    assert approval is not None
+    assert approval.status == "approved"
+    assert approval.user_feedback == "use the focused test target"
+    assert approval.edited_payload_json == '{"command": "pytest tests/unit/test_api.py -q"}'
+
+
+def test_approval_route_returns_404_for_unknown_pending_approval(tmp_path: Path) -> None:
+    app = create_app(_settings(tmp_path))
+    client = TestClient(app)
+
+    created = client.post("/api/session", json={"title": "Missing Approval"})
+    session_id = created.json()["id"]
+
+    response = client.post(
+        f"/api/approval/{session_id}/missing-approval",
+        json={"approved": False, "user_feedback": "not this one"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Pending approval not found"}
+
+
 def test_interrupt_route_reports_idle_session(tmp_path: Path) -> None:
     app = create_app(_settings(tmp_path))
     client = TestClient(app)
