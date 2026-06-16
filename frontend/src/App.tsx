@@ -8,6 +8,7 @@ import {
   getApiBaseLabel,
   sendChatMessage,
 } from './api';
+import ToolTracePanel from './components/ToolTracePanel';
 import type {
   MessagePayload,
   PendingApprovalPayload,
@@ -56,32 +57,6 @@ function statusTone(status: string) {
   if (status === 'error' || status === 'failed') return 'danger';
   if (status === 'idle' || status === 'completed' || status === 'passed') return 'success';
   return 'neutral';
-}
-
-function eventTitle(eventType: string) {
-  return eventType
-    .split('_')
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
-}
-
-function eventSummary(event: SessionEventPayload) {
-  const content = event.data.content;
-  if (typeof content === 'string' && content.trim()) {
-    return content;
-  }
-
-  const output = event.data.output;
-  if (typeof output === 'string' && output.trim()) {
-    return output;
-  }
-
-  const error = event.data.error;
-  if (typeof error === 'string' && error.trim()) {
-    return error;
-  }
-
-  return JSON.stringify(event.data);
 }
 
 function App() {
@@ -478,23 +453,6 @@ function App() {
             </section>
 
             <section className="info-card">
-              <h3>Live stream</h3>
-              {liveEvents.length === 0 ? (
-                <p className="muted">SSE events will appear here while the active session runs.</p>
-              ) : (
-                liveEvents.slice(-8).map((event) => (
-                  <div key={event.id} className="event-card">
-                    <div className="mini-row">
-                      <strong>{eventTitle(event.event_type)}</strong>
-                      <span>#{event.sequence}</span>
-                    </div>
-                    <p>{eventSummary(event)}</p>
-                  </div>
-                ))
-              )}
-            </section>
-
-            <section className="info-card">
               <h3>Pending approvals</h3>
               {pendingApprovals.length === 0 ? (
                 <p className="muted">None right now.</p>
@@ -508,22 +466,7 @@ function App() {
               )}
             </section>
 
-            <section className="info-card">
-              <h3>Tool calls</h3>
-              {toolCalls.length === 0 ? (
-                <p className="muted">Tool calls will appear here when the agent starts using tools.</p>
-              ) : (
-                toolCalls.map((toolCall) => (
-                  <div key={toolCall.id} className="tool-card">
-                    <div className="mini-row">
-                      <strong>{toolCall.tool_name}</strong>
-                      <span className={`status-pill ${statusTone(toolCall.status)}`}>{toolCall.status}</span>
-                    </div>
-                    <p>{toolCall.requires_approval ? 'Approval required' : 'No approval required'}</p>
-                  </div>
-                ))
-              )}
-            </section>
+            <ToolTracePanel liveEvents={liveEvents} pendingApprovals={pendingApprovals} toolCalls={toolCalls} />
           </div>
         </aside>
       </main>
