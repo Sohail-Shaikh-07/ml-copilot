@@ -49,4 +49,3 @@ export function createSession(payload: CreateSessionRequest) {
     body: JSON.stringify(payload),
   });
 }
-

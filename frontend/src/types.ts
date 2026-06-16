@@ -57,4 +57,3 @@ export interface MessagePayload {
   sequence: number;
   created_at: string;
 }
-
