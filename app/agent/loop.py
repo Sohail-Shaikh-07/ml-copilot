@@ -390,7 +390,6 @@ class AgentLoop:
             approval_ids: list[str] = []
 
             for tool_call in tool_calls:
-                metrics.record_tool_call(tool_call.name, {"__raw_arguments__": tool_call.arguments})
                 await self.emit_event(
                     ctx,
                     EventType.TOOL_CALL,
@@ -405,6 +404,7 @@ class AgentLoop:
                     arguments = tool_call.arguments_as_json()
                 except Exception as exc:
                     error_message = f"Tool execution error: {exc}"
+                    metrics.record_tool_call(tool_call.name, {"__raw_arguments__": tool_call.arguments})
                     metrics.record_tool_error()
                     self.repo.add_tool_call(
                         session_id=ctx.session_id,
@@ -432,6 +432,7 @@ class AgentLoop:
                 requires_approval = (
                     self.settings.safety.require_tool_approval and tool_call.name in APPROVAL_REQUIRED_TOOLS
                 )
+                metrics.record_tool_call(tool_call.name, arguments)
                 if requires_approval:
                     self.repo.add_tool_call(
                         session_id=ctx.session_id,
