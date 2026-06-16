@@ -136,7 +136,7 @@ Assistant responds
 - ML dataset inspection
 - docs and paper helpers
 - eval runner
-- lightweight frontend for chat, approvals, and tool traces
+- React + Vite frontend shell for chat, approvals, and tool traces
 
 ## Repo Boundaries
 
