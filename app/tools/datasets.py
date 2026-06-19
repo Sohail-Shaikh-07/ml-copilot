@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 
 from app.config import AppSettings
+from app.tools.context import current_hf_token
 from app.tools.workspace import _safe_path
 
 HF_DATASETS_SERVER = "https://datasets-server.huggingface.co"
@@ -300,7 +301,7 @@ async def _inspect_hf(source: str, args: dict[str, Any]) -> str:
     config = args.get("config")
     split = args.get("split")
     sample_rows = min(args.get("sample_rows", 3), MAX_SAMPLE_ROWS)
-    token = args.get("token")
+    token = current_hf_token()
 
     headers: dict[str, str] = {}
     if token:

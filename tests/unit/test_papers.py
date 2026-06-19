@@ -9,6 +9,7 @@ import httpx
 import pytest
 
 from app.config import AppPaths, AppSettings
+from app.tools.context import ToolExecutionContext, use_tool_execution_context
 from app.tools.papers import (
     _format_paper_details,
     _normalize_arxiv_id,
@@ -49,6 +50,53 @@ def test_format_paper_details() -> None:
     assert "org/repo" in result
     assert "AI Summary" in result
     assert "Abstract" in result
+
+
+@pytest.mark.asyncio
+async def test_paper_details_handler_uses_session_token(tmp_path: Path) -> None:
+    class FakeResponse:
+        def __init__(self, payload: dict[str, object]):
+            self._payload = payload
+
+        def json(self) -> dict[str, object]:
+            return self._payload
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class FakeAsyncClient:
+        instances: list["FakeAsyncClient"] = []
+
+        def __init__(self, *args, **kwargs):
+            self.headers = kwargs.get("headers", {})
+            FakeAsyncClient.instances.append(self)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url, params=None):
+            return FakeResponse(
+                {
+                    "id": "2305.18290",
+                    "title": "A Sample Paper",
+                    "upvotes": 10,
+                    "summary": "Paper abstract.",
+                    "authors": [{"name": "Ada"}],
+                }
+            )
+
+    with patch("app.tools.papers.httpx.AsyncClient", new=FakeAsyncClient):
+        with use_tool_execution_context(ToolExecutionContext(session_id="session-1", hf_token="hf-session-token")):
+            result = await paper_details_handler(
+                {"arxiv_id": "https://huggingface.co/papers/2305.18290"},
+                _settings(tmp_path),
+            )
+
+    assert "A Sample Paper" in result
+    assert FakeAsyncClient.instances[0].headers["Authorization"] == "Bearer hf-session-token"
 
 
 @pytest.mark.asyncio

@@ -11,13 +11,19 @@ import type {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? '';
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, hfToken?: string | null): Promise<T> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(init?.headers ? (init.headers as Record<string, string>) : {}),
+  };
+  if (hfToken) {
+    headers.Authorization = `Bearer ${hfToken}`;
+  }
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
     ...init,
+    credentials: 'include',
+    headers,
   });
 
   if (!response.ok) {
@@ -47,25 +53,30 @@ export function fetchMessages(sessionId: string) {
   return request<MessagePayload[]>(`/api/session/${sessionId}/messages`);
 }
 
-export function createSession(payload: CreateSessionRequest) {
+export function createSession(payload: CreateSessionRequest, hfToken?: string | null) {
   return request<SessionSummary>('/api/session', {
     method: 'POST',
     body: JSON.stringify(payload),
-  });
+  }, hfToken);
 }
 
-export function sendChatMessage(sessionId: string, payload: ChatRequest) {
+export function sendChatMessage(sessionId: string, payload: ChatRequest, hfToken?: string | null) {
   return request<ChatResponse>(`/api/chat/${sessionId}`, {
     method: 'POST',
     body: JSON.stringify(payload),
-  });
+  }, hfToken);
 }
 
-export function resolveApproval(sessionId: string, approvalId: string, payload: ApprovalDecisionRequest) {
+export function resolveApproval(
+  sessionId: string,
+  approvalId: string,
+  payload: ApprovalDecisionRequest,
+  hfToken?: string | null,
+) {
   return request<ChatResponse>(`/api/approval/${sessionId}/${approvalId}`, {
     method: 'POST',
     body: JSON.stringify(payload),
-  });
+  }, hfToken);
 }
 
 export function createSessionEventSource(
@@ -77,7 +88,9 @@ export function createSessionEventSource(
   },
 ) {
   const query = options.after !== undefined ? `?after=${options.after}` : '';
-  const source = new EventSource(`${API_BASE_URL}/api/events/${sessionId}${query}`);
+  const source = new EventSource(`${API_BASE_URL}/api/events/${sessionId}${query}`, {
+    withCredentials: true,
+  });
 
   source.onmessage = (message) => {
     options.onEvent(JSON.parse(message.data) as SessionEventPayload);

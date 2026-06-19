@@ -181,7 +181,7 @@ Create a runtime environment file from the example:
 cp .env.example .env
 ```
 
-Set at least `LLM_API_KEY` and, when needed, adjust `LLM_BASE_URL`, `LLM_MODEL`, `ML_COPILOT_DB_PATH`, and the safety flags.
+Set at least `LLM_API_KEY` and, when needed, adjust `LLM_BASE_URL`, `LLM_MODEL`, `ML_COPILOT_DB_PATH`, and the safety flags. If you will use Hugging Face-backed tools without a per-session token, set `HF_TOKEN` as a local fallback.
 
 ## Run Locally
 

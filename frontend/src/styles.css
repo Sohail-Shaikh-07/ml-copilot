@@ -272,6 +272,14 @@ button {
   font-size: 0.84rem;
 }
 
+.hint {
+  display: block;
+  margin-top: -2px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
 .composer-card input,
 .composer-shell textarea {
   width: 100%;

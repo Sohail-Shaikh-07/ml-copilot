@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.agent.loop import AgentLoop, create_agent_loop
+from app.auth import resolve_hf_request_token
 from app.config import AppSettings
 from app.storage.models import (
     MessageRecord,
@@ -23,7 +24,7 @@ from app.storage.models import (
 )
 from app.storage.repository import SQLiteRepository
 
-from .runtime import ActiveTurnManager
+from .runtime import ActiveTurnManager, SessionAuthManager
 from .schemas import (
     ApprovalDecisionRequest,
     ChatRequest,
@@ -58,20 +59,26 @@ def create_app(
     app.state.loop_factory = loop_factory or _default_loop_factory
     app.state.event_stream_manager = SessionEventStreamManager()
     app.state.active_turn_manager = ActiveTurnManager()
+    app.state.session_auth_manager = SessionAuthManager()
 
     router = APIRouter(prefix="/api", tags=["sessions"])
 
     @router.post("/session", response_model=SessionSummary, status_code=status.HTTP_201_CREATED)
     async def create_session(
         payload: CreateSessionRequest,
+        request: Request,
         repo: RepositoryDep,
         current_settings: SettingsDep,
     ) -> SessionSummary:
+        session_token = _resolve_session_token(request)
+        metadata = _sanitize_metadata(payload.metadata)
         record = repo.create_session(
             model=payload.model or current_settings.llm.model,
             title=payload.title,
-            metadata=payload.metadata,
+            metadata=metadata,
         )
+        if session_token:
+            get_session_auth_manager(request).set_token(record.id, session_token)
         return _serialize_session_summary(repo, record)
 
     @router.get("/sessions", response_model=list[SessionSummary])
@@ -120,6 +127,10 @@ def create_app(
     ) -> ChatResponse:
         session = _get_session_or_404(repo, session_id)
         active_turn_manager = get_active_turn_manager(request)
+        session_token = _resolve_session_token(request)
+        if session_token:
+            get_session_auth_manager(request).set_token(session_id, session_token)
+        hf_token = _token_for_session(request, session_id)
         if not active_turn_manager.register(session_id, loop):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -137,6 +148,7 @@ def create_app(
                 session=session,
                 user_message=payload.message,
                 system_prompt=payload.system_prompt,
+                hf_token=hf_token,
             )
         except asyncio.CancelledError:
             result = {"status": "interrupted"}
@@ -165,6 +177,10 @@ def create_app(
     ) -> ChatResponse:
         session = _get_session_or_404(repo, session_id)
         active_turn_manager = get_active_turn_manager(request)
+        session_token = _resolve_session_token(request)
+        if session_token:
+            get_session_auth_manager(request).set_token(session_id, session_token)
+        hf_token = _token_for_session(request, session_id)
         if not active_turn_manager.register(session_id, loop):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -184,6 +200,7 @@ def create_app(
                 user_feedback=payload.user_feedback,
                 edited_arguments=payload.edited_arguments,
                 system_prompt=payload.system_prompt,
+                hf_token=hf_token,
             )
         except KeyError as exc:
             fallback_status = "waiting_approval" if repo.list_pending_approvals(session_id) else "idle"
@@ -250,6 +267,10 @@ def get_active_turn_manager(request: Request) -> ActiveTurnManager:
     return request.app.state.active_turn_manager
 
 
+def get_session_auth_manager(request: Request) -> SessionAuthManager:
+    return request.app.state.session_auth_manager
+
+
 def get_repository(
     request: Request,
     settings: Annotated[AppSettings, Depends(get_settings)],
@@ -275,6 +296,38 @@ def _default_repository_factory(settings: AppSettings) -> SQLiteRepository:
 
 def _default_loop_factory(settings: AppSettings, repository: SQLiteRepository) -> AgentLoop:
     return create_agent_loop(settings, repository=repository)
+
+
+def _resolve_session_token(request: Request) -> str | None:
+    """Resolve an explicit HF token from the incoming request."""
+    return resolve_hf_request_token(request, include_env_fallback=False)
+
+
+def _token_for_session(request: Request, session_id: str) -> str | None:
+    """Resolve the token to use for a session, falling back to env/cache."""
+    auth_manager = get_session_auth_manager(request)
+    return auth_manager.get_token(session_id) or resolve_hf_request_token(request)
+
+
+def _sanitize_metadata(value: dict[str, Any]) -> dict[str, Any]:
+    def _sanitize(item: Any) -> Any:
+        if isinstance(item, dict):
+            return {key: _sanitize(child) for key, child in item.items() if not _is_sensitive_metadata_key(str(key))}
+        if isinstance(item, list):
+            return [_sanitize(child) for child in item]
+        return item
+
+    return _sanitize(value)
+
+
+def _is_sensitive_metadata_key(key: str) -> bool:
+    normalized = key.strip().lower().replace("-", "_")
+    return (
+        "token" in normalized
+        or "authorization" in normalized
+        or "bearer" in normalized
+        or normalized in {"secret", "apikey", "api_key"}
+    )
 
 
 def _mount_frontend_if_available(app: FastAPI, settings: AppSettings) -> None:

@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.config import AppPaths, AppSettings
+from app.tools.context import ToolExecutionContext, use_tool_execution_context
 from app.tools.docs import (
     DOC_ENDPOINTS,
     _format_results,
@@ -174,6 +175,40 @@ class TestFetchDocPageHandler:
             await fetch_doc_page_handler({"url": "https://huggingface.co/docs/trl/sft"}, _settings(tmp_path))
             call_url = mock_client.get.call_args[0][0]
         assert call_url.endswith(".md")
+
+    @pytest.mark.asyncio
+    async def test_uses_session_token(self, tmp_path: Path) -> None:
+        class FakeResponse:
+            text = "# DPO Trainer\n\nContent here."
+
+            def raise_for_status(self) -> None:
+                return None
+
+        class FakeAsyncClient:
+            instances: list["FakeAsyncClient"] = []
+
+            def __init__(self, *args, **kwargs):
+                self.headers = kwargs.get("headers", {})
+                FakeAsyncClient.instances.append(self)
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return None
+
+            async def get(self, url):
+                return FakeResponse()
+
+        with patch("app.tools.docs.httpx.AsyncClient", new=FakeAsyncClient):
+            with use_tool_execution_context(ToolExecutionContext(session_id="session-1", hf_token="hf-session-token")):
+                result = await fetch_doc_page_handler(
+                    {"url": "https://huggingface.co/docs/trl/dpo_trainer"},
+                    _settings(tmp_path),
+                )
+
+        assert "DPO Trainer" in result
+        assert FakeAsyncClient.instances[0].headers["Authorization"] == "Bearer hf-session-token"
 
     @pytest.mark.asyncio
     async def test_rejects_non_hf_docs_urls(self, tmp_path: Path) -> None:
