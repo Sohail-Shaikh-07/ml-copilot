@@ -14,6 +14,7 @@ from app.agent.llm import LLMClient, Usage
 from app.config import AppSettings
 from app.storage.models import MessageRecord, PendingApprovalRecord, SessionRecord
 from app.storage.repository import SQLiteRepository
+from app.tools.context import ToolExecutionContext, use_tool_execution_context
 from app.tools.registry import ToolHandler, ToolRegistry, ToolSpec, UnknownToolError
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,7 @@ class TurnContext:
     messages: list[dict[str, Any]]
     event_sequence: int
     message_sequence: int
+    hf_token: str | None = None
 
 
 @dataclass
@@ -184,9 +186,10 @@ class AgentLoop:
         session: SessionRecord,
         user_message: str,
         system_prompt: str | None = None,
+        hf_token: str | None = None,
     ) -> dict[str, Any]:
         """Run a complete turn for a new user message."""
-        ctx = self._build_turn_context(session, system_prompt)
+        ctx = self._build_turn_context(session, system_prompt, hf_token=hf_token)
         await self.emit_event(ctx, EventType.READY, {"message": "Agent ready"})
 
         pending_approvals = self.repo.list_pending_approvals(session.id)
@@ -214,9 +217,10 @@ class AgentLoop:
         user_feedback: str | None = None,
         edited_arguments: dict[str, Any] | None = None,
         system_prompt: str | None = None,
+        hf_token: str | None = None,
     ) -> dict[str, Any]:
         """Apply an approval decision and continue the agent loop."""
-        ctx = self._build_turn_context(session, system_prompt)
+        ctx = self._build_turn_context(session, system_prompt, hf_token=hf_token)
         await self.emit_event(ctx, EventType.READY, {"message": "Approval decision received"})
         await self.emit_event(ctx, EventType.PROCESSING, {})
 
@@ -267,6 +271,8 @@ class AgentLoop:
         self,
         session: SessionRecord,
         system_prompt: str | None,
+        *,
+        hf_token: str | None = None,
     ) -> TurnContext:
         prompt = system_prompt or _default_system_prompt()
         history = [_message_to_llm_dict(record) for record in self.repo.list_messages(session.id)]
@@ -276,6 +282,7 @@ class AgentLoop:
             messages=[{"role": "system", "content": prompt}, *history],
             event_sequence=self.repo.next_event_sequence(session.id),
             message_sequence=self.repo.next_message_sequence(session.id),
+            hf_token=hf_token,
         )
 
     async def _run_loop(
@@ -532,7 +539,13 @@ class AgentLoop:
 
         start = perf_counter()
         try:
-            tool_output = await self.tools.call(tool_name, arguments)
+            with use_tool_execution_context(
+                ToolExecutionContext(
+                    session_id=ctx.session_id,
+                    hf_token=ctx.hf_token,
+                )
+            ):
+                tool_output = await self.tools.call(tool_name, arguments)
             success = True
             error = None
         except asyncio.CancelledError:

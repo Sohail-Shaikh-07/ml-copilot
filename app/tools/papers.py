@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 import httpx
 
 from app.config import AppSettings
+from app.tools.context import current_hf_token
 
 HF_API = "https://huggingface.co/api"
 
@@ -80,7 +81,12 @@ def _format_paper_details(paper: dict[str, Any]) -> str:
 
 
 async def _fetch_paper(arxiv_id: str) -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=15) as client:
+    headers: dict[str, str] = {}
+    token = current_hf_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    async with httpx.AsyncClient(timeout=15, headers=headers) as client:
         resp = await client.get(f"{HF_API}/papers/{arxiv_id}")
         resp.raise_for_status()
         return resp.json()

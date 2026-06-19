@@ -57,6 +57,38 @@ class ApprovalFlowLLMClient:
         return LLMResponse(model="gpt-test", content=self.final_content, finish_reason="stop")
 
 
+class TokenAwareLoop:
+    def __init__(self) -> None:
+        self.run_turn_tokens: list[str | None] = []
+        self.resume_tokens: list[str | None] = []
+        self._handlers: list[object] = []
+
+    def add_event_handler(self, handler) -> None:
+        self._handlers.append(handler)
+
+    def remove_event_handler(self, handler) -> None:
+        if handler in self._handlers:
+            self._handlers.remove(handler)
+
+    async def run_turn(self, *, session, user_message, system_prompt=None, hf_token=None):
+        self.run_turn_tokens.append(hf_token)
+        return {"status": "complete", "content": "Token-aware response.", "iterations": 1}
+
+    async def resume_pending_approval(
+        self,
+        *,
+        session,
+        approval_id,
+        approved,
+        user_feedback=None,
+        edited_arguments=None,
+        system_prompt=None,
+        hf_token=None,
+    ):
+        self.resume_tokens.append(hf_token)
+        return {"status": "complete", "content": "Token-aware response.", "iterations": 1}
+
+
 def _settings(tmp_path: Path) -> AppSettings:
     return AppSettings.load(
         environ={
@@ -87,6 +119,37 @@ def test_create_and_list_sessions_via_api(tmp_path: Path) -> None:
     assert len(listed_body) == 1
     assert listed_body[0]["id"] == created_body["id"]
     assert listed_body[0]["message_count"] == 0
+
+
+def test_session_token_is_stored_and_reused_for_turns(tmp_path: Path) -> None:
+    token_loop = TokenAwareLoop()
+
+    def loop_factory(app_settings: AppSettings, repository: SQLiteRepository):
+        return token_loop
+
+    app = create_app(_settings(tmp_path), loop_factory=loop_factory)
+    client = TestClient(app)
+
+    created = client.post(
+        "/api/session",
+        json={
+            "title": "Token Session",
+            "metadata": {"source": "test", "hf_token": "should-not-persist"},
+        },
+        headers={"Authorization": "Bearer hf-session-token"},
+    )
+    assert created.status_code == 201
+    session_id = created.json()["id"]
+    assert created.json()["metadata"] == {"source": "test"}
+    assert client.app.state.session_auth_manager.get_token(session_id) == "hf-session-token"
+
+    response = client.post(
+        f"/api/chat/{session_id}",
+        json={"message": "Use the stored token"},
+    )
+
+    assert response.status_code == 200
+    assert token_loop.run_turn_tokens == ["hf-session-token"]
 
 
 def test_chat_route_persists_messages_and_session_state(tmp_path: Path) -> None:

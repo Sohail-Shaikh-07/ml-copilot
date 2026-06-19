@@ -94,6 +94,7 @@ function App() {
   const [resolvingApproval, setResolvingApproval] = useState(false);
   const [draftTitle, setDraftTitle] = useState('');
   const [draftModel, setDraftModel] = useState('');
+  const [draftHfToken, setDraftHfToken] = useState('');
   const [draftPrompt, setDraftPrompt] = useState('');
 
   useEffect(() => {
@@ -216,7 +217,7 @@ function App() {
         title: draftTitle.trim() || null,
         model: draftModel.trim() || null,
         metadata: seedMetadata,
-      });
+      }, draftHfToken.trim() || null);
       setSessions((current) => [created, ...current.filter((session) => session.id !== created.id)]);
       setSelectedSessionId(created.id);
       setDraftTitle('');
@@ -245,7 +246,11 @@ function App() {
     connectEventStream(selectedSessionId, { replay: false });
 
     try {
-      const response = await sendChatMessage(selectedSessionId, { message: prompt });
+      const response = await sendChatMessage(
+        selectedSessionId,
+        { message: prompt },
+        draftHfToken.trim() || null,
+      );
       setActiveSession(response.session);
       setMessages(response.messages);
       setLiveAssistantText('');
@@ -282,7 +287,12 @@ function App() {
     connectEventStream(selectedSessionId, { replay: false });
 
     try {
-      const response = await resolveApproval(selectedSessionId, approvalId, payload);
+      const response = await resolveApproval(
+        selectedSessionId,
+        approvalId,
+        payload,
+        draftHfToken.trim() || null,
+      );
       setActiveSession(response.session);
       setMessages(response.messages);
       setSessions((current) =>
@@ -351,6 +361,7 @@ function App() {
             activeSession={activeSession}
             creating={creating}
             draftModel={draftModel}
+            draftHfToken={draftHfToken}
             draftTitle={draftTitle}
             messages={messages}
             onCreateSession={handleCreateSession}
@@ -359,6 +370,7 @@ function App() {
             selectedSessionId={selectedSessionId}
             sessions={sessions}
             setDraftModel={setDraftModel}
+            setDraftHfToken={setDraftHfToken}
             setDraftTitle={setDraftTitle}
           />
         </aside>

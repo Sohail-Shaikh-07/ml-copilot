@@ -4,6 +4,7 @@ import type { MessagePayload, SessionDetail, SessionSummary } from '../types';
 interface SessionSidebarProps {
   activeSession: SessionDetail | null;
   creating: boolean;
+  draftHfToken: string;
   draftModel: string;
   draftTitle: string;
   messages: MessagePayload[];
@@ -12,6 +13,7 @@ interface SessionSidebarProps {
   onSelectSession: (sessionId: string) => void;
   selectedSessionId: string | null;
   sessions: SessionSummary[];
+  setDraftHfToken: (value: string) => void;
   setDraftModel: (value: string) => void;
   setDraftTitle: (value: string) => void;
 }
@@ -59,6 +61,7 @@ function roleLabel(role: string) {
 export default function SessionSidebar({
   activeSession,
   creating,
+  draftHfToken,
   draftModel,
   draftTitle,
   messages,
@@ -67,6 +70,7 @@ export default function SessionSidebar({
   onSelectSession,
   selectedSessionId,
   sessions,
+  setDraftHfToken,
   setDraftModel,
   setDraftTitle,
 }: SessionSidebarProps) {
@@ -102,6 +106,16 @@ export default function SessionSidebar({
             onChange={(event) => setDraftModel(event.target.value)}
             placeholder="gpt-5.4"
           />
+        </label>
+        <label>
+          Hugging Face token
+          <input
+            type="password"
+            value={draftHfToken}
+            onChange={(event) => setDraftHfToken(event.target.value)}
+            placeholder="hf_xxx"
+          />
+          <span className="hint">Kept in memory only and sent with requests for this browser session.</span>
         </label>
         <button className="primary-button" type="submit" disabled={creating}>
           {creating ? 'Creating...' : 'Create session'}

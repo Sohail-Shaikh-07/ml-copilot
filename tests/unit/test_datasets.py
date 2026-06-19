@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.config import AppPaths, AppSettings
+from app.tools.context import ToolExecutionContext, use_tool_execution_context
 from app.tools.datasets import (
     _inspect_csv,
     _inspect_json,
@@ -31,6 +32,50 @@ class TestLooksLikeLocalPath:
 
     def test_nonexistent(self, tmp_path: Path) -> None:
         assert _looks_like_local_path("user/dataset", tmp_path) is False
+
+
+@pytest.mark.asyncio
+async def test_inspect_hf_dataset_uses_session_token(tmp_path: Path) -> None:
+    class FakeResponse:
+        def __init__(self, payload: dict[str, object]):
+            self._payload = payload
+
+        def json(self) -> dict[str, object]:
+            return self._payload
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class FakeAsyncClient:
+        instances: list["FakeAsyncClient"] = []
+
+        def __init__(self, *args, **kwargs):
+            self.headers = kwargs.get("headers", {})
+            FakeAsyncClient.instances.append(self)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url, params=None):
+            if url.endswith("/is-valid"):
+                return FakeResponse({"preview": True})
+            if url.endswith("/splits"):
+                return FakeResponse({"splits": [{"config": "default", "split": "train"}]})
+            if url.endswith("/info"):
+                return FakeResponse({"dataset_info": {"features": {"text": {"dtype": "string"}}}})
+            if url.endswith("/first-rows"):
+                return FakeResponse({"rows": [{"row": {"text": "hello"}}]})
+            return FakeResponse({})
+
+    with patch("app.tools.datasets.httpx.AsyncClient", new=FakeAsyncClient):
+        with use_tool_execution_context(ToolExecutionContext(session_id="session-1", hf_token="hf-session-token")):
+            result = await inspect_dataset_handler({"source": "hf-user/imdb"}, _settings(tmp_path))
+
+    assert "hf-user/imdb (Hugging Face)" in result
+    assert FakeAsyncClient.instances[0].headers["Authorization"] == "Bearer hf-session-token"
 
 
 class TestInspectCsv:

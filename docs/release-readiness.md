@@ -35,6 +35,7 @@ Important runtime paths and safety flags:
 - `ML_COPILOT_REDACT_SECRETS`
 - `ML_COPILOT_ENABLE_MCP`
 - `ML_COPILOT_MCP_MANIFEST_PATH`
+- `HF_TOKEN` (optional fallback for HF-backed reads and writes)
 
 Confirm the resolved configuration without printing secrets:
 

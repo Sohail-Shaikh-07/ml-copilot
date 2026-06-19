@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.agent.loop import AgentLoop
+from app.auth import clean_hf_token
 
 
 @dataclass(frozen=True)
@@ -66,3 +67,27 @@ class ActiveTurnManager:
         active_turn.loop.interrupt()
         active_turn.event_loop.call_soon_threadsafe(active_turn.task.cancel)
         return True
+
+
+class SessionAuthManager:
+    """In-memory per-session Hugging Face token store."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._tokens: dict[str, str] = {}
+
+    def set_token(self, session_id: str, token: str | None) -> None:
+        cleaned = clean_hf_token(token)
+        with self._lock:
+            if cleaned is None:
+                self._tokens.pop(session_id, None)
+            else:
+                self._tokens[session_id] = cleaned
+
+    def get_token(self, session_id: str) -> str | None:
+        with self._lock:
+            return self._tokens.get(session_id)
+
+    def clear(self, session_id: str) -> None:
+        with self._lock:
+            self._tokens.pop(session_id, None)

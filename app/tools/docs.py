@@ -14,6 +14,7 @@ from whoosh.filedb.filestore import RamStorage
 from whoosh.qparser import MultifieldParser, OrGroup
 
 from app.config import AppSettings
+from app.tools.context import current_hf_token
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -59,8 +60,12 @@ _cache_lock = asyncio.Lock()
 async def _fetch_endpoint_docs(endpoint: str) -> list[dict[str, str]]:
     """Fetch all doc pages for an endpoint by parsing sidebar and fetching each page."""
     url = f"https://huggingface.co/docs/{endpoint}"
+    headers: dict[str, str] = {}
+    token = current_hf_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
 
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, headers=headers) as client:
         resp = await client.get(url)
         resp.raise_for_status()
 
@@ -314,7 +319,11 @@ async def fetch_doc_page_handler(args: dict[str, Any], settings: AppSettings) ->
     url = normalized_url
 
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        headers: dict[str, str] = {}
+        token = current_hf_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, headers=headers) as client:
             resp = await client.get(url)
             resp.raise_for_status()
         return f"## Documentation: {url}\n\n{resp.text}"
