@@ -928,8 +928,8 @@ def create_agent_loop(
 
 
 def _create_tool_registry(settings: AppSettings) -> ToolRegistry:
-    """Create and populate the tool registry with workspace, reporting, dataset, docs, paper, and repo tools."""
-    from app.tools import datasets, docs, mcp, papers, repo_analyzer, reporting, workspace
+    """Create and populate the built-in and configured tool registry."""
+    from app.tools import datasets, docs, hub, mcp, papers, repo_analyzer, reporting, workspace
 
     registry = ToolRegistry()
     workspace_specs = workspace.get_tool_specs()
@@ -959,7 +959,16 @@ def _create_tool_registry(settings: AppSettings) -> ToolRegistry:
             name=spec["name"],
             description=spec["description"],
             input_schema=spec.get("parameters", {"type": "object", "properties": {}}),
-            handler=_make_dataset_handler(settings),
+            handler=_make_dataset_handler(spec["name"], settings),
+        )
+        registry.register(tool_spec)
+
+    for spec in hub.get_tool_specs():
+        tool_spec = ToolSpec(
+            name=spec["name"],
+            description=spec["description"],
+            input_schema=spec.get("parameters", {"type": "object", "properties": {}}),
+            handler=_make_hub_handler(spec["name"], settings),
         )
         registry.register(tool_spec)
 
@@ -1029,12 +1038,32 @@ def _make_report_handler(settings: AppSettings) -> ToolHandler:
     return _handler
 
 
-def _make_dataset_handler(settings: AppSettings) -> ToolHandler:
-    """Create a handler for the inspect_dataset tool."""
+def _make_dataset_handler(name: str, settings: AppSettings) -> ToolHandler:
+    """Create a handler for dataset inspection and BYOD ingestion tools."""
     from app.tools import datasets
 
+    handlers = {
+        "inspect_dataset": datasets.inspect_dataset_handler,
+        "ingest_dataset": datasets.ingest_dataset_handler,
+    }
+
     async def _handler(args: dict[str, Any]) -> str:
-        return await datasets.inspect_dataset_handler(args, settings)
+        return await handlers[name](args, settings)
+
+    return _handler
+
+
+def _make_hub_handler(name: str, settings: AppSettings) -> ToolHandler:
+    """Create a handler for Hub discovery and repository inspection."""
+    from app.tools import hub
+
+    handlers = {
+        "search_hub": hub.search_hub_handler,
+        "inspect_hub_repo": hub.inspect_hub_repo_handler,
+    }
+
+    async def _handler(args: dict[str, Any]) -> str:
+        return await handlers[name](args, settings)
 
     return _handler
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from typing import Annotated, Any, Callable
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, status
@@ -23,6 +24,7 @@ from app.storage.models import (
     SessionMetricsSummary as SessionMetricsRecord,
 )
 from app.storage.repository import SQLiteRepository
+from app.tools.datasets import inspect_dataset_handler, validate_dataset_filename
 
 from .runtime import ActiveTurnManager, SessionAuthManager
 from .schemas import (
@@ -30,6 +32,7 @@ from .schemas import (
     ChatRequest,
     ChatResponse,
     CreateSessionRequest,
+    DatasetUploadResponse,
     InterruptResponse,
     MessagePayload,
     PendingApprovalPayload,
@@ -43,6 +46,7 @@ from .streaming import SessionEventStreamManager, create_event_stream_response
 
 RepositoryFactory = Callable[[AppSettings], SQLiteRepository]
 LoopFactory = Callable[[AppSettings, SQLiteRepository], AgentLoop]
+MAX_DATASET_UPLOAD_BYTES = 25 * 1024 * 1024
 
 
 def create_app(
@@ -86,6 +90,64 @@ def create_app(
         repo: RepositoryDep,
     ) -> list[SessionSummary]:
         return [_serialize_session_summary(repo, session) for session in repo.list_sessions()]
+
+    @router.post(
+        "/datasets/upload",
+        response_model=DatasetUploadResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def upload_dataset(
+        request: Request,
+        current_settings: SettingsDep,
+    ) -> DatasetUploadResponse:
+        filename = request.headers.get("X-Filename", "").strip()
+        filename_error = validate_dataset_filename(filename)
+        if filename_error:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=filename_error)
+
+        content_length = request.headers.get("Content-Length")
+        if content_length:
+            try:
+                declared_size = int(content_length)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Content-Length must be an integer.",
+                ) from exc
+            if declared_size > MAX_DATASET_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                    detail=f"Dataset upload exceeds {MAX_DATASET_UPLOAD_BYTES} bytes.",
+                )
+
+        payload = await request.body()
+        if not payload:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dataset upload is empty.")
+        if len(payload) > MAX_DATASET_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=f"Dataset upload exceeds {MAX_DATASET_UPLOAD_BYTES} bytes.",
+            )
+
+        upload_dir = current_settings.paths.workspace_root / ".ml-copilot" / "uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        destination = _available_upload_path(upload_dir, filename)
+        destination.write_bytes(payload)
+        relative_path = destination.relative_to(current_settings.paths.workspace_root).as_posix()
+        preview = await inspect_dataset_handler(
+            {"source": relative_path, "source_kind": "local", "sample_rows": 3},
+            current_settings,
+        )
+        if preview.startswith("Error:"):
+            destination.unlink(missing_ok=True)
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=preview)
+
+        return DatasetUploadResponse(
+            filename=destination.name,
+            path=relative_path,
+            size_bytes=len(payload),
+            preview=preview,
+        )
 
     @router.get("/session/{session_id}", response_model=SessionDetail)
     async def get_session(
@@ -318,6 +380,20 @@ def _sanitize_metadata(value: dict[str, Any]) -> dict[str, Any]:
         return item
 
     return _sanitize(value)
+
+
+def _available_upload_path(directory: Path, filename: str) -> Path:
+    destination = directory / filename
+    if not destination.exists():
+        return destination
+    stem = destination.stem
+    suffix = destination.suffix
+    index = 2
+    while True:
+        candidate = directory / f"{stem}-{index}{suffix}"
+        if not candidate.exists():
+            return candidate
+        index += 1
 
 
 def _is_sensitive_metadata_key(key: str) -> bool:

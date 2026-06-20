@@ -1,4 +1,5 @@
-import type { FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
+import { uploadDataset } from '../api';
 import type { MessagePayload, SessionDetail, SessionSummary } from '../types';
 
 interface SessionSidebarProps {
@@ -74,9 +75,27 @@ export default function SessionSidebar({
   setDraftModel,
   setDraftTitle,
 }: SessionSidebarProps) {
+  const [datasetFile, setDatasetFile] = useState<File | null>(null);
+  const [datasetStatus, setDatasetStatus] = useState('');
+  const [uploadingDataset, setUploadingDataset] = useState(false);
   const isCurrentSession = Boolean(activeSession && activeSession.id === selectedSessionId);
   const currentSession = isCurrentSession ? activeSession : null;
   const recentMessages = isCurrentSession ? [...messages].slice(-3) : [];
+
+  async function handleDatasetUpload() {
+    if (!datasetFile) return;
+    setUploadingDataset(true);
+    setDatasetStatus('');
+    try {
+      const uploaded = await uploadDataset(datasetFile);
+      setDatasetStatus(`Ready at ${uploaded.path}`);
+      setDatasetFile(null);
+    } catch (error) {
+      setDatasetStatus(error instanceof Error ? error.message : 'Dataset upload failed.');
+    } finally {
+      setUploadingDataset(false);
+    }
+  }
 
   return (
     <div className="session-sidebar">
@@ -121,6 +140,27 @@ export default function SessionSidebar({
           {creating ? 'Creating...' : 'Create session'}
         </button>
       </form>
+
+      <section className="dataset-upload-card">
+        <div>
+          <p className="panel-label">Bring your own data</p>
+          <strong>Upload a dataset</strong>
+        </div>
+        <input
+          type="file"
+          accept=".csv,.tsv,.json,.jsonl,.parquet"
+          onChange={(event) => setDatasetFile(event.target.files?.[0] ?? null)}
+        />
+        <button
+          className="ghost-button"
+          type="button"
+          disabled={!datasetFile || uploadingDataset}
+          onClick={handleDatasetUpload}
+        >
+          {uploadingDataset ? 'Uploading...' : 'Upload and preview'}
+        </button>
+        {datasetStatus ? <p className="hint">{datasetStatus}</p> : null}
+      </section>
 
       <div className="session-list">
         {sessions.length === 0 ? (

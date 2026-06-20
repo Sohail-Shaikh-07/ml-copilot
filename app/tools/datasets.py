@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -18,23 +19,93 @@ HF_DATASETS_SERVER = "https://datasets-server.huggingface.co"
 MAX_SAMPLE_ROWS = 5
 MAX_VALUE_LEN = 120
 MAX_LOCAL_ROWS_SCAN = 10_000
+SUPPORTED_DATASET_EXTENSIONS = {".csv", ".tsv", ".jsonl", ".json", ".parquet"}
 
 
 async def inspect_dataset_handler(args: dict[str, Any], settings: AppSettings) -> str:
     """Tool handler: inspect a local file or HF dataset."""
-    source = args.get("source", "")
+    source = str(args.get("source", "")).strip()
     if not source:
         return "Error: No source provided. Pass a local file path or HF dataset name (e.g. 'imdb')."
 
-    # Route: no slash = always local; relative path prefix = local; otherwise check heuristic
-    if "/" not in source and "\\" not in source:
+    source_kind = str(args.get("source_kind", "auto")).strip().lower()
+    if source_kind == "local":
         return await _inspect_local(source, args, settings)
+    if source_kind == "hub":
+        return await _inspect_hf(source, args)
     if source.startswith(("./", "../", ".\\", "..\\", "/")):
         return await _inspect_local(source, args, settings)
     # Has a slash — could be HF namespace (user/dataset) or a local subpath
     if _looks_like_local_path(source, settings.paths.workspace_root):
         return await _inspect_local(source, args, settings)
+    if "/" not in source and "\\" not in source and Path(source).suffix.lower() in SUPPORTED_DATASET_EXTENSIONS:
+        return await _inspect_local(source, args, settings)
     return await _inspect_hf(source, args)
+
+
+async def ingest_dataset_handler(args: dict[str, Any], settings: AppSettings) -> str:
+    """Validate and copy a workspace-local dataset into managed BYOD storage."""
+    source = str(args.get("source", "")).strip()
+    if not source:
+        return "Error: source is required."
+
+    workspace_root = settings.paths.workspace_root
+    source_path = Path(source) if Path(source).is_absolute() else workspace_root / source
+    safe_source = _safe_path(source_path, workspace_root)
+    if safe_source is None:
+        return f"Error: Path {source!r} is outside workspace root."
+    if not safe_source.exists() or not safe_source.is_file():
+        return f"Error: Dataset file not found: {source}"
+
+    filename_error = validate_dataset_filename(safe_source.name)
+    if filename_error:
+        return f"Error: {filename_error}"
+
+    destination_dir = workspace_root / ".ml-copilot" / "datasets"
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    destination = _unique_destination(destination_dir, safe_source.name)
+    if safe_source.resolve() != destination.resolve():
+        shutil.copy2(safe_source, destination)
+
+    managed_path = destination.relative_to(workspace_root).as_posix()
+    original_path = safe_source.relative_to(workspace_root).as_posix()
+    preview = await _inspect_local(managed_path, args, settings)
+    return (
+        "## BYOD dataset ingested\n\n"
+        f"**Managed path:** `{managed_path}`\n"
+        f"**Original path:** `{original_path}`\n\n"
+        f"{preview}"
+    )
+
+
+def validate_dataset_filename(filename: str) -> str | None:
+    """Validate a user-provided dataset filename."""
+    if "/" in filename or "\\" in filename:
+        return "Filename must not contain directory components."
+    safe_name = Path(filename).name
+    if safe_name != filename or safe_name in {"", ".", ".."}:
+        return "Filename must not contain directory components."
+    if len(safe_name) > 255:
+        return "Filename must be 255 characters or fewer."
+    extension = Path(safe_name).suffix.lower()
+    if extension not in SUPPORTED_DATASET_EXTENSIONS:
+        supported = ", ".join(sorted(SUPPORTED_DATASET_EXTENSIONS))
+        return f"Unsupported file type '{extension}'. Supported: {supported}"
+    return None
+
+
+def _unique_destination(directory: Path, filename: str) -> Path:
+    destination = directory / filename
+    if not destination.exists():
+        return destination
+    stem = destination.stem
+    suffix = destination.suffix
+    index = 2
+    while True:
+        candidate = directory / f"{stem}-{index}{suffix}"
+        if not candidate.exists():
+            return candidate
+        index += 1
 
 
 def _looks_like_local_path(source: str, workspace_root: Path) -> bool:
@@ -441,6 +512,11 @@ def get_tool_specs() -> list[dict[str, Any]]:
                             "(e.g. 'data/train.csv' or 'imdb' or 'username/dataset')."
                         ),
                     },
+                    "source_kind": {
+                        "type": "string",
+                        "enum": ["auto", "local", "hub"],
+                        "description": "Force local or Hub routing when auto-detection is ambiguous.",
+                    },
                     "config": {
                         "type": "string",
                         "description": "HF dataset config name (optional, auto-detected).",
@@ -452,6 +528,27 @@ def get_tool_specs() -> list[dict[str, Any]]:
                     "sample_rows": {
                         "type": "integer",
                         "description": "Number of sample rows to show (default: 3, max: 5).",
+                    },
+                },
+                "required": ["source"],
+            },
+        },
+        {
+            "name": "ingest_dataset",
+            "description": (
+                "Ingest a user-provided dataset from a workspace-local path into managed BYOD "
+                "storage, validate its format, and return a lightweight schema/sample preview."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "description": "Workspace-local CSV, TSV, JSON, JSONL, or Parquet file path.",
+                    },
+                    "sample_rows": {
+                        "type": "integer",
+                        "description": "Number of preview rows to show (default: 5, max: 5).",
                     },
                 },
                 "required": ["source"],

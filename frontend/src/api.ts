@@ -11,6 +11,13 @@ import type {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? '';
 
+export interface DatasetUploadResponse {
+  filename: string;
+  path: string;
+  size_bytes: number;
+  preview: string;
+}
+
 async function request<T>(path: string, init?: RequestInit, hfToken?: string | null): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -77,6 +84,17 @@ export function resolveApproval(
     method: 'POST',
     body: JSON.stringify(payload),
   }, hfToken);
+}
+
+export function uploadDataset(file: File) {
+  return request<DatasetUploadResponse>('/api/datasets/upload', {
+    method: 'POST',
+    body: file,
+    headers: {
+      'Content-Type': file.type || 'application/octet-stream',
+      'X-Filename': file.name,
+    },
+  });
 }
 
 export function createSessionEventSource(
