@@ -153,6 +153,13 @@ def test_dataset_upload_rejects_unsafe_filename(tmp_path: Path) -> None:
     assert response.status_code == 400
     assert "directory components" in response.json()["detail"]
 
+    windows_response = client.post(
+        "/api/datasets/upload",
+        content=b"text\nhello\n",
+        headers={"X-Filename": "..\\train.csv"},
+    )
+    assert windows_response.status_code == 400
+
 
 def test_dataset_upload_rejects_declared_oversize_before_storage(tmp_path: Path) -> None:
     app = create_app(_settings(tmp_path))

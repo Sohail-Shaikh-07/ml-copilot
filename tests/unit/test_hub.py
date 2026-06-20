@@ -53,6 +53,7 @@ async def test_search_hub_ranks_task_and_license_matches(tmp_path: Path, monkeyp
     FakeAsyncClient.responses = {
         "https://huggingface.co/api/models": FakeResponse(
             [
+                {"downloads": 999999, "tags": None},
                 {
                     "id": "org/general-model",
                     "downloads": 1000,
@@ -65,7 +66,8 @@ async def test_search_hub_ranks_task_and_license_matches(tmp_path: Path, monkeyp
                     "downloads": 500,
                     "likes": 5,
                     "pipeline_tag": "text-classification",
-                    "tags": ["license:mit", "transformers"],
+                    "tags": None,
+                    "cardData": {"license": "mit"},
                 },
             ]
         )
@@ -111,7 +113,7 @@ async def test_inspect_dataset_repo_reports_required_column_fit(tmp_path: Path, 
                 "dataset_info": {
                     "features": {
                         "messages": {"_type": "Sequence"},
-                        "source": {"dtype": "string"},
+                        "source": "string",
                     }
                 }
             }
@@ -131,4 +133,5 @@ async def test_inspect_dataset_repo_reports_required_column_fit(tmp_path: Path, 
 
     assert "Dataset Schema (default/train)" in result
     assert "| messages | Sequence |" in result
+    assert "| source | str |" in result
     assert "**Required columns check:** pass" in result

@@ -80,9 +80,13 @@ async def ingest_dataset_handler(args: dict[str, Any], settings: AppSettings) ->
 
 def validate_dataset_filename(filename: str) -> str | None:
     """Validate a user-provided dataset filename."""
+    if "/" in filename or "\\" in filename:
+        return "Filename must not contain directory components."
     safe_name = Path(filename).name
     if safe_name != filename or safe_name in {"", ".", ".."}:
         return "Filename must not contain directory components."
+    if len(safe_name) > 255:
+        return "Filename must be 255 characters or fewer."
     extension = Path(safe_name).suffix.lower()
     if extension not in SUPPORTED_DATASET_EXTENSIONS:
         supported = ", ".join(sorted(SUPPORTED_DATASET_EXTENSIONS))

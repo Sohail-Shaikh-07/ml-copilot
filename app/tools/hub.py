@@ -57,11 +57,22 @@ async def search_hub_handler(args: dict[str, Any], settings: AppSettings) -> str
     if not isinstance(payload, list) or not payload:
         return "No matching Hub repositories found."
 
-    scored = [
-        _scored_candidate(item, repo_type=repo_type, query=query, task=task, tags=tags, license_name=license_name)
-        for item in payload[:limit]
-        if isinstance(item, dict)
-    ]
+    scored = []
+    for item in payload[:limit]:
+        if not isinstance(item, dict) or not _repo_id(item):
+            continue
+        scored.append(
+            _scored_candidate(
+                item,
+                repo_type=repo_type,
+                query=query,
+                task=task,
+                tags=tags,
+                license_name=license_name,
+            )
+        )
+    if not scored:
+        return "No valid Hub repository metadata was returned."
     scored.sort(key=lambda item: item["score"], reverse=True)
     return _format_search_results(
         scored,
@@ -152,7 +163,10 @@ def _repo_id(item: dict[str, Any]) -> str:
 
 
 def _repo_tags(item: dict[str, Any]) -> list[str]:
-    return [str(tag) for tag in item.get("tags", []) if str(tag).strip()]
+    tags = item.get("tags")
+    if not isinstance(tags, list):
+        return []
+    return [str(tag) for tag in tags if str(tag).strip()]
 
 
 def _license(item: dict[str, Any]) -> str:
@@ -326,7 +340,10 @@ def _format_repo_details(
             sections.append("| Column | Type |")
             sections.append("|---|---|")
             for name, info in list(features.items())[:20]:
-                dtype = info.get("dtype") or info.get("_type") or type(info).__name__
+                if isinstance(info, dict):
+                    dtype = info.get("dtype") or info.get("_type") or "unknown"
+                else:
+                    dtype = type(info).__name__
                 sections.append(f"| {name} | {dtype} |")
         else:
             sections.append("No schema preview was available from datasets-server.")
