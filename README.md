@@ -143,6 +143,12 @@ Assistant responds
 - React + Vite frontend shell for chat, approvals, and tool traces
 - release packaging and documentation hardening
 
+### Phase 4
+
+- per-session Hugging Face authentication
+- Hub model and dataset discovery with task, license, and schema fit signals
+- BYOD upload and workspace-local dataset ingestion with validated previews
+
 ## Repo Boundaries
 
 This repository is only for the actual `ML Copilot` product.

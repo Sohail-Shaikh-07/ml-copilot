@@ -121,6 +121,56 @@ def test_create_and_list_sessions_via_api(tmp_path: Path) -> None:
     assert listed_body[0]["message_count"] == 0
 
 
+def test_dataset_upload_stores_and_previews_supported_file(tmp_path: Path) -> None:
+    app = create_app(_settings(tmp_path))
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/datasets/upload",
+        content=b"text,label\nhello,1\nworld,0\n",
+        headers={"X-Filename": "train.csv", "Content-Type": "text/csv"},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["filename"] == "train.csv"
+    assert body["path"] == ".ml-copilot/uploads/train.csv"
+    assert body["size_bytes"] > 0
+    assert "hello" in body["preview"]
+    assert (tmp_path / body["path"]).exists()
+
+
+def test_dataset_upload_rejects_unsafe_filename(tmp_path: Path) -> None:
+    app = create_app(_settings(tmp_path))
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/datasets/upload",
+        content=b"text\nhello\n",
+        headers={"X-Filename": "../train.csv"},
+    )
+
+    assert response.status_code == 400
+    assert "directory components" in response.json()["detail"]
+
+
+def test_dataset_upload_rejects_declared_oversize_before_storage(tmp_path: Path) -> None:
+    app = create_app(_settings(tmp_path))
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/datasets/upload",
+        content=b"text\nhello\n",
+        headers={
+            "X-Filename": "train.csv",
+            "Content-Length": str(25 * 1024 * 1024 + 1),
+        },
+    )
+
+    assert response.status_code == 413
+    assert not (tmp_path / ".ml-copilot" / "uploads" / "train.csv").exists()
+
+
 def test_session_token_is_stored_and_reused_for_turns(tmp_path: Path) -> None:
     token_loop = TokenAwareLoop()
 

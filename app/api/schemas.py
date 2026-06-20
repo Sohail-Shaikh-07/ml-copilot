@@ -116,3 +116,10 @@ class InterruptResponse(BaseModel):
     status: str
     interrupted: bool
     message: str
+
+
+class DatasetUploadResponse(BaseModel):
+    filename: str
+    path: str
+    size_bytes: int
+    preview: str

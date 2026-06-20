@@ -16,6 +16,7 @@ from app.tools.datasets import (
     _inspect_jsonl,
     _looks_like_local_path,
     get_tool_specs,
+    ingest_dataset_handler,
     inspect_dataset_handler,
 )
 
@@ -210,10 +211,45 @@ class TestInspectDatasetHandler:
             result = await inspect_dataset_handler({"source": "username/dataset"}, settings)
         assert "Hugging Face" in result
 
+    @pytest.mark.asyncio
+    async def test_bare_hf_dataset_name_routes_to_hub(self, tmp_path: Path) -> None:
+        settings = _settings(tmp_path)
+        with patch("app.tools.datasets._inspect_hf", new_callable=AsyncMock) as mock_hf:
+            mock_hf.return_value = "## imdb (Hugging Face)"
+            result = await inspect_dataset_handler({"source": "imdb"}, settings)
+        assert "Hugging Face" in result
+        mock_hf.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_source_kind_can_force_local_routing(self, tmp_path: Path) -> None:
+        (tmp_path / "dataset").write_text("text,label\nhello,1\n", encoding="utf-8")
+        result = await inspect_dataset_handler(
+            {"source": "dataset", "source_kind": "local"},
+            _settings(tmp_path),
+        )
+        assert "Unsupported file type" in result
+
+
+@pytest.mark.asyncio
+async def test_ingest_dataset_copies_and_previews_byod_file(tmp_path: Path) -> None:
+    source = tmp_path / "uploads" / "train.csv"
+    source.parent.mkdir()
+    source.write_text("text,label\nhello,1\nworld,0\n", encoding="utf-8")
+
+    result = await ingest_dataset_handler(
+        {"source": "uploads/train.csv", "sample_rows": 2},
+        _settings(tmp_path),
+    )
+
+    managed = tmp_path / ".ml-copilot" / "datasets" / "train.csv"
+    assert managed.read_text(encoding="utf-8") == source.read_text(encoding="utf-8")
+    assert "BYOD dataset ingested" in result
+    assert ".ml-copilot/datasets/train.csv" in result
+    assert "hello" in result
+
 
 class TestGetToolSpecs:
     def test_spec(self) -> None:
         specs = get_tool_specs()
-        assert len(specs) == 1
-        assert specs[0]["name"] == "inspect_dataset"
+        assert [spec["name"] for spec in specs] == ["inspect_dataset", "ingest_dataset"]
         assert "source" in specs[0]["parameters"]["properties"]

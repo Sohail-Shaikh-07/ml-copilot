@@ -245,6 +245,7 @@ button {
 }
 
 .composer-card,
+.dataset-upload-card,
 .info-card,
 .tool-card,
 .session-card,
@@ -262,6 +263,30 @@ button {
   margin-bottom: 16px;
   padding: 14px;
   border-radius: 22px;
+}
+
+.dataset-upload-card {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 2px;
+  padding: 14px;
+  border-radius: 18px;
+}
+
+.dataset-upload-card input[type='file'] {
+  width: 100%;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.dataset-upload-card input[type='file']::file-selector-button {
+  margin-right: 10px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.14);
+  color: var(--text);
+  padding: 8px 11px;
+  cursor: pointer;
 }
 
 .composer-card label,
