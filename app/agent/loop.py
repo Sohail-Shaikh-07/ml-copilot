@@ -986,7 +986,7 @@ def _create_tool_registry(settings: AppSettings) -> ToolRegistry:
             name=spec["name"],
             description=spec["description"],
             input_schema=spec.get("parameters", {"type": "object", "properties": {}}),
-            handler=_make_papers_handler(settings),
+            handler=_make_papers_handler(spec["name"], settings),
         )
         registry.register(tool_spec)
 
@@ -1068,12 +1068,19 @@ def _make_hub_handler(name: str, settings: AppSettings) -> ToolHandler:
     return _handler
 
 
-def _make_papers_handler(settings: AppSettings) -> ToolHandler:
-    """Create a handler for the paper_details tool."""
+def _make_papers_handler(name: str, settings: AppSettings) -> ToolHandler:
+    """Create a handler for a paper research tool (metadata, citations, reading, recipes)."""
     from app.tools import papers
 
+    handlers = {
+        "paper_details": papers.paper_details_handler,
+        "paper_citation_graph": papers.paper_citation_graph_handler,
+        "read_paper": papers.read_paper_handler,
+        "extract_training_recipe": papers.extract_training_recipe_handler,
+    }
+
     async def _handler(args: dict[str, Any]) -> str:
-        return await papers.paper_details_handler(args, settings)
+        return await handlers[name](args, settings)
 
     return _handler
 
