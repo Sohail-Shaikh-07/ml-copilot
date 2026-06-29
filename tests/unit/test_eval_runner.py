@@ -8,13 +8,64 @@ from pathlib import Path
 import pytest
 
 from app.config import AppPaths, AppSettings
-from app.evals.runner import EvalFixture, EvalRunner, fixture_from_dict, load_fixture
+from app.evals.runner import EvalFixture, EvalRunner, fixture_from_dict, load_fixture, run_scripted_fixture
 from app.storage.models import SessionRecord
 from app.storage.repository import SQLiteRepository
 
 
 def _settings(tmp_path: Path) -> AppSettings:
     return AppSettings.from_paths(AppPaths.from_workspace_root(tmp_path))
+
+
+@pytest.mark.asyncio
+async def test_scripted_fixture_writes_declared_solution_files(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    fixture = fixture_from_dict(
+        {
+            "id": "fixture-scripted",
+            "prompt": "Create the report",
+            "workspace_files": [{"path": "input.txt", "content": "seed\n"}],
+            "solution_files": [{"path": "report.md", "content": "done\n"}],
+            "solution_response": "scripted completion",
+            "checks": [
+                {"type": "contains", "value": "scripted completion"},
+                {"type": "file_contains", "path": "report.md", "value": "done"},
+            ],
+        }
+    )
+
+    result = await EvalRunner(settings, agent_runner=run_scripted_fixture).run_fixture(
+        fixture,
+        output_dir=tmp_path / "eval-output",
+    )
+    report = json.loads(result.record.report_json)
+
+    assert result.record.status == "passed"
+    assert result.record.score == 1.0
+    assert (result.workspace_path / "report.md").read_text(encoding="utf-8") == "done\n"
+    assert report["agent_output"]["mode"] == "scripted"
+    assert report["scoring"]["token_usage"]["total_tokens"] == 0
+
+
+@pytest.mark.asyncio
+async def test_scripted_fixture_rejects_solution_paths_that_escape_workspace(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    fixture = fixture_from_dict(
+        {
+            "id": "fixture-scripted-escape",
+            "prompt": "Create the report",
+            "solution_files": [{"path": "../outside.txt", "content": "bad\n"}],
+        }
+    )
+
+    result = await EvalRunner(settings, agent_runner=run_scripted_fixture).run_fixture(
+        fixture,
+        output_dir=tmp_path / "eval-output",
+    )
+    report = json.loads(result.record.report_json)
+
+    assert result.record.status == "error"
+    assert "escapes workspace" in report["error"]
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,17 @@
       "content": "# Training task\n\nThe script should accept `--epochs` and `--output`.\n"
     }
   ],
+  "solution_files": [
+    {
+      "path": "train.py",
+      "content": "import argparse\nfrom pathlib import Path\n\n\ndef main() -> None:\n    parser = argparse.ArgumentParser()\n    parser.add_argument('--epochs', type=int, required=True)\n    parser.add_argument('--output', required=True)\n    args = parser.parse_args()\n    Path(args.output).mkdir(parents=True, exist_ok=True)\n    Path('training_report.md').write_text(f'Training completed for {args.epochs} epochs.\\n', encoding='utf-8')\n\n\nif __name__ == '__main__':\n    main()\n"
+    },
+    {
+      "path": "training_report.md",
+      "content": "Training completed for 3 epochs.\n"
+    }
+  ],
+  "solution_response": "Updated train.py argument parsing and wrote training_report.md.",
   "checks": [
     {
       "type": "file_contains",

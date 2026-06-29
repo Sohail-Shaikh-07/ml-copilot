@@ -12,6 +12,13 @@
       "content": "from pathlib import Path\n\n\ndef main() -> None:\n    data_path = Path('data/train.csv')\n    print(f'Validating {data_path}')\n\n\nif __name__ == '__main__':\n    main()\n"
     }
   ],
+  "solution_files": [
+    {
+      "path": "dataset_report.md",
+      "content": "# Dataset Report\n\n- rows: 3\n- missing values: 1\n\nThe training data has three rows and one missing feature_b value.\n"
+    }
+  ],
+  "solution_response": "Wrote dataset_report.md with row and missing value findings.",
   "checks": [
     {
       "type": "file_exists",

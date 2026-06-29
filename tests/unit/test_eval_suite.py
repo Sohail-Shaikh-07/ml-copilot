@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from app.config import AppPaths, AppSettings
-from app.evals.runner import EvalFixture
+from app.evals.runner import EvalFixture, run_scripted_fixture
 from app.evals.suite import EvalSuiteRunner, discover_fixture_paths
 from app.storage.models import SessionRecord
 from app.storage.repository import SQLiteRepository
@@ -92,3 +92,20 @@ async def test_eval_suite_runner_writes_aggregate_reports(tmp_path: Path) -> Non
     assert "# Eval Suite Report" in markdown
     assert "fixture-pass" in markdown
     assert "fixture-fail" in markdown
+
+
+@pytest.mark.asyncio
+async def test_bundled_eval_fixtures_pass_with_scripted_runner(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    fixture_dir = Path(__file__).resolve().parents[1] / "fixtures" / "evals"
+
+    result = await EvalSuiteRunner(settings, agent_runner=run_scripted_fixture).run_path(
+        fixture_dir,
+        output_dir=tmp_path / "eval-output",
+    )
+
+    assert result.status == "passed"
+    assert result.score == 1.0
+    assert result.report["summary"]["fixtures_total"] == 5
+    assert result.report["summary"]["fixtures_passed"] == 5
+    assert result.report["summary"]["total_tokens"] == 0
