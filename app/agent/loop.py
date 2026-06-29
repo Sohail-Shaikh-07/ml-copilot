@@ -937,6 +937,7 @@ def _create_tool_registry(settings: AppSettings) -> ToolRegistry:
         jobs,
         mcp,
         papers,
+        publishing,
         repo_analyzer,
         reporting,
         sandbox,
@@ -1008,6 +1009,15 @@ def _create_tool_registry(settings: AppSettings) -> ToolRegistry:
             description=spec["description"],
             input_schema=spec.get("parameters", {"type": "object", "properties": {}}),
             handler=_make_experiment_loop_handler(settings),
+        )
+        registry.register(tool_spec)
+
+    for spec in publishing.get_tool_specs():
+        tool_spec = ToolSpec(
+            name=spec["name"],
+            description=spec["description"],
+            input_schema=spec.get("parameters", {"type": "object", "properties": {}}),
+            handler=_make_publishing_handler(settings),
         )
         registry.register(tool_spec)
 
@@ -1133,6 +1143,16 @@ def _make_experiment_loop_handler(settings: AppSettings) -> ToolHandler:
 
     async def _handler(args: dict[str, Any]) -> str:
         return await experiments.manage_experiment_loop_handler(args, settings)
+
+    return _handler
+
+
+def _make_publishing_handler(settings: AppSettings) -> ToolHandler:
+    """Create a handler for model publishing assets and final reports."""
+    from app.tools import publishing
+
+    async def _handler(args: dict[str, Any]) -> str:
+        return await publishing.publish_model_report_handler(args, settings)
 
     return _handler
 
