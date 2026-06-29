@@ -145,6 +145,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print the persisted eval report JSON instead of a short summary",
     )
+    eval_parser.add_argument(
+        "--agent-mode",
+        choices=["live", "scripted"],
+        default="live",
+        help="Executor for eval fixtures: live agent turn or scripted fixture-declared outputs",
+    )
 
     return parser
 
@@ -390,11 +396,15 @@ async def cmd_reject(args: argparse.Namespace, settings: AppSettings) -> int:
 
 async def cmd_eval(args: argparse.Namespace, settings: AppSettings) -> int:
     """Execute the 'eval' command."""
-    from app.evals import EvalRunner, EvalSuiteRunner, discover_fixture_paths, load_fixture
+    from app.evals import EvalRunner, EvalSuiteRunner, discover_fixture_paths, load_fixture, run_scripted_fixture
 
     fixture_paths = discover_fixture_paths(args.fixture)
+    agent_runner = run_scripted_fixture if args.agent_mode == "scripted" else None
     if len(fixture_paths) > 1 or args.fixture.resolve().is_dir():
-        suite_result = await EvalSuiteRunner(settings).run_fixture_paths(fixture_paths, output_dir=args.output_dir)
+        suite_result = await EvalSuiteRunner(settings, agent_runner=agent_runner).run_fixture_paths(
+            fixture_paths,
+            output_dir=args.output_dir,
+        )
         if args.json:
             print(suite_result.report_json)
         else:
@@ -407,7 +417,7 @@ async def cmd_eval(args: argparse.Namespace, settings: AppSettings) -> int:
         return 0 if suite_result.status == "passed" else 1
 
     fixture = load_fixture(fixture_paths[0])
-    runner = EvalRunner(settings)
+    runner = EvalRunner(settings, agent_runner=agent_runner)
     result = await runner.run_fixture(fixture, output_dir=args.output_dir)
 
     if args.json:

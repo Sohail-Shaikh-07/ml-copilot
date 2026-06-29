@@ -38,6 +38,8 @@ class EvalFixture:
     prompt: str
     name: str | None = None
     workspace_files: list[EvalFile] = field(default_factory=list)
+    solution_files: list[EvalFile] = field(default_factory=list)
+    solution_response: str | None = None
     checks: list[EvalCheck] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -195,6 +197,26 @@ async def run_agent_fixture(
     }
 
 
+async def run_scripted_fixture(
+    fixture: EvalFixture,
+    workspace_path: Path,
+    _settings: AppSettings,
+    _session: SessionRecord,
+) -> dict[str, Any]:
+    """Deterministic fixture executor that applies declared solution files."""
+    for file in fixture.solution_files:
+        target = _resolve_workspace_file(workspace_path, file.path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(file.content, encoding="utf-8")
+
+    return {
+        "content": fixture.solution_response or "Scripted eval fixture completed.",
+        "mode": "scripted",
+        "workspace_path": str(workspace_path),
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    }
+
+
 def load_fixture(path: Path) -> EvalFixture:
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
@@ -210,6 +232,8 @@ def fixture_from_dict(raw: dict[str, Any]) -> EvalFixture:
         name=_optional_str(raw.get("name")),
         prompt=prompt,
         workspace_files=_parse_files(raw.get("workspace_files", raw.get("files", []))),
+        solution_files=_parse_files(raw.get("solution_files", [])),
+        solution_response=_optional_str(raw.get("solution_response")),
         checks=_parse_checks(raw.get("checks", [])),
         metadata=raw.get("metadata", {}) if isinstance(raw.get("metadata", {}), dict) else {},
     )

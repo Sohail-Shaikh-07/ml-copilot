@@ -12,6 +12,7 @@ The runner executes JSON task fixtures with:
 
 - a clean workspace rendered from fixture files
 - one agent turn against the fixture prompt
+- an optional scripted baseline that applies fixture-declared solution files
 - deterministic scoring checks
 - persisted `eval_runs` records
 - JSON and Markdown artifacts for each run
@@ -29,6 +30,13 @@ The runner executes JSON task fixtures with:
       "content": "# Sample project\n"
     }
   ],
+  "solution_files": [
+    {
+      "path": "summary.md",
+      "content": "# Summary\n\nSample project summary.\n"
+    }
+  ],
+  "solution_response": "Wrote summary.md.",
   "checks": [
     {
       "type": "contains",
@@ -47,6 +55,10 @@ The runner executes JSON task fixtures with:
 }
 ```
 
+`solution_files` and `solution_response` are used only by scripted eval mode.
+They provide a deterministic baseline for fixture plumbing, scoring, and suite
+reporting without requiring a live LLM or API key.
+
 Supported check types:
 
 - `contains`: final agent response includes `value`
@@ -62,10 +74,22 @@ Run an eval fixture:
 python -m app.main eval path/to/fixture.json
 ```
 
+Run an eval fixture with deterministic fixture-declared outputs:
+
+```bash
+python -m app.main eval path/to/fixture.json --agent-mode scripted
+```
+
 Run every fixture in a directory as a suite:
 
 ```bash
 python -m app.main eval tests/fixtures/evals
+```
+
+Run every bundled fixture as a deterministic scripted suite:
+
+```bash
+python -m app.main eval tests/fixtures/evals --agent-mode scripted
 ```
 
 Use a custom artifact directory:

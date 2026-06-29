@@ -16,6 +16,17 @@
       "content": "import json\nfrom pathlib import Path\n\n\ndef main() -> None:\n    predictions = json.loads(Path('predictions.json').read_text(encoding='utf-8'))\n    references = json.loads(Path('references.json').read_text(encoding='utf-8'))\n    print(len(predictions), len(references))\n\n\nif __name__ == '__main__':\n    main()\n"
     }
   ],
+  "solution_files": [
+    {
+      "path": "evaluate.py",
+      "content": "import json\nfrom pathlib import Path\n\n\ndef main() -> None:\n    predictions = json.loads(Path('predictions.json').read_text(encoding='utf-8'))\n    references = json.loads(Path('references.json').read_text(encoding='utf-8'))\n    correct = sum(pred == ref for pred, ref in zip(predictions, references))\n    accuracy = correct / len(references) if references else 0.0\n    Path('eval_report.json').write_text(json.dumps({'accuracy': accuracy}, indent=2) + '\\n', encoding='utf-8')\n\n\nif __name__ == '__main__':\n    main()\n"
+    },
+    {
+      "path": "eval_report.json",
+      "content": "{\n  \"accuracy\": 0.6666666666666666\n}\n"
+    }
+  ],
+  "solution_response": "Implemented accuracy calculation and wrote eval_report.json.",
   "checks": [
     {
       "type": "file_contains",

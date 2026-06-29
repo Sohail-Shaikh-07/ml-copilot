@@ -8,6 +8,13 @@
       "content": "# Model Card\n\n## Overview\nA small text classifier.\n\n## Training\nTrained on a toy dataset.\n"
     }
   ],
+  "solution_files": [
+    {
+      "path": "model_card.md",
+      "content": "# Model Card\n\n## Overview\nA small text classifier.\n\n## Training\nTrained on a toy dataset.\n\n## Inference\nCall the model with a text input and read the predicted label from the returned output.\n\n## Safety\nValidate model outputs before using them in user-facing workflows.\n"
+    }
+  ],
+  "solution_response": "Added inference usage notes and a Safety section to model_card.md.",
   "checks": [
     {
       "type": "file_contains",

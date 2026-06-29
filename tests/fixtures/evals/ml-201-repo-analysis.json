@@ -16,6 +16,13 @@
       "content": "def tool() -> str:\n    return 'tool'\n"
     }
   ],
+  "solution_files": [
+    {
+      "path": "analysis.md",
+      "content": "# Repository Analysis\n\nThe architecture is a small Python app with source code under app/ and documentation in README.md.\n\nThe main entrypoint is app/main.py, which currently prints a greeting.\n\nNext risks include adding tests, dependency metadata, and clearer tool boundaries.\n"
+    }
+  ],
+  "solution_response": "Wrote analysis.md with architecture, entrypoint, and risk notes.",
   "checks": [
     {
       "type": "file_exists",
