@@ -133,7 +133,7 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser.add_argument(
         "fixture",
         type=Path,
-        help="Path to an eval fixture JSON file",
+        help="Path to an eval fixture JSON file or a directory of fixture JSON files",
     )
     eval_parser.add_argument(
         "--output-dir",
@@ -390,9 +390,23 @@ async def cmd_reject(args: argparse.Namespace, settings: AppSettings) -> int:
 
 async def cmd_eval(args: argparse.Namespace, settings: AppSettings) -> int:
     """Execute the 'eval' command."""
-    from app.evals import EvalRunner, load_fixture
+    from app.evals import EvalRunner, EvalSuiteRunner, discover_fixture_paths, load_fixture
 
-    fixture = load_fixture(args.fixture)
+    fixture_paths = discover_fixture_paths(args.fixture)
+    if len(fixture_paths) > 1 or args.fixture.resolve().is_dir():
+        suite_result = await EvalSuiteRunner(settings).run_fixture_paths(fixture_paths, output_dir=args.output_dir)
+        if args.json:
+            print(suite_result.report_json)
+        else:
+            summary = suite_result.report["summary"]
+            print("Eval suite run")
+            print(f"Status: {suite_result.status}")
+            print(f"Fixtures: {summary['fixtures_passed']}/{summary['fixtures_total']} passed")
+            print(f"Average score: {suite_result.score}")
+            print(f"Report: {suite_result.markdown_path}")
+        return 0 if suite_result.status == "passed" else 1
+
+    fixture = load_fixture(fixture_paths[0])
     runner = EvalRunner(settings)
     result = await runner.run_fixture(fixture, output_dir=args.output_dir)
 

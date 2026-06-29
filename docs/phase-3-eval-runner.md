@@ -62,6 +62,12 @@ Run an eval fixture:
 python -m app.main eval path/to/fixture.json
 ```
 
+Run every fixture in a directory as a suite:
+
+```bash
+python -m app.main eval tests/fixtures/evals
+```
+
 Use a custom artifact directory:
 
 ```bash
@@ -75,6 +81,7 @@ python -m app.main eval path/to/fixture.json --json
 ```
 
 The command exits with `0` when all checks pass and `1` when the eval fails or errors.
+For directory suite runs, the command exits with `0` only when every fixture passes.
 
 ## Artifacts
 
@@ -83,6 +90,8 @@ Each run writes:
 - `workspaces/<fixture-id>/<eval-run-id>/` for the reproducible fixture workspace
 - `artifacts/<eval-run-id>/report.json` for machine-readable results
 - `artifacts/<eval-run-id>/report.md` for reviewer-friendly results
+- `suites/<suite-id>/suite-report.json` for aggregate directory runs
+- `suites/<suite-id>/suite-report.md` for reviewer-friendly aggregate directory runs
 
 The same report payload is persisted in SQLite under `eval_runs.report_json`.
 
@@ -101,6 +110,17 @@ automation:
 
 The Markdown report mirrors the same information with dedicated sections for
 changed files, safety events, and check results.
+
+## Suite Report Format
+
+Directory runs reuse the same fixture runner for each task and then write one
+aggregate report with:
+
+- overall suite status: `passed`, `failed`, or `error`
+- fixture counts for passed, failed, and errored tasks
+- average score across fixtures
+- total runtime and token count
+- per-fixture eval run IDs, status, score, workspaces, and report paths
 
 ## Bundled Fixtures
 
