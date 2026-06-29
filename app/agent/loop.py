@@ -929,7 +929,7 @@ def create_agent_loop(
 
 def _create_tool_registry(settings: AppSettings) -> ToolRegistry:
     """Create and populate the built-in and configured tool registry."""
-    from app.tools import datasets, docs, hub, jobs, mcp, papers, repo_analyzer, reporting, workspace
+    from app.tools import datasets, docs, hub, jobs, mcp, papers, repo_analyzer, reporting, sandbox, workspace
 
     registry = ToolRegistry()
     workspace_specs = workspace.get_tool_specs()
@@ -978,6 +978,15 @@ def _create_tool_registry(settings: AppSettings) -> ToolRegistry:
             description=spec["description"],
             input_schema=spec.get("parameters", {"type": "object", "properties": {}}),
             handler=_make_jobs_handler(settings),
+        )
+        registry.register(tool_spec)
+
+    for spec in sandbox.get_tool_specs():
+        tool_spec = ToolSpec(
+            name=spec["name"],
+            description=spec["description"],
+            input_schema=spec.get("parameters", {"type": "object", "properties": {}}),
+            handler=_make_sandbox_handler(settings),
         )
         registry.register(tool_spec)
 
@@ -1083,6 +1092,16 @@ def _make_jobs_handler(settings: AppSettings) -> ToolHandler:
 
     async def _handler(args: dict[str, Any]) -> str:
         return await jobs.manage_job_handler(args, settings)
+
+    return _handler
+
+
+def _make_sandbox_handler(settings: AppSettings) -> ToolHandler:
+    """Create a handler for sandbox-first experiment workspaces."""
+    from app.tools import sandbox
+
+    async def _handler(args: dict[str, Any]) -> str:
+        return await sandbox.experiment_workspace_handler(args, settings)
 
     return _handler
 

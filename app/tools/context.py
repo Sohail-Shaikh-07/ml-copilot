@@ -45,3 +45,8 @@ def current_hf_token() -> str | None:
         os.environ.get("HF_TOKEN"),
         os.environ.get("HUGGING_FACE_HUB_TOKEN"),
     )
+
+
+def current_session_id() -> str | None:
+    context = get_current_tool_context()
+    return context.session_id if context else None
