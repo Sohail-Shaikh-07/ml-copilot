@@ -152,6 +152,19 @@ async def test_write_rejects_path_escape(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_remote_operations_require_hf_token(tmp_path: Path) -> None:
+    _write_record(tmp_path)
+    with patch("app.tools.sandbox.current_hf_token", return_value=None):
+        with use_tool_execution_context(ToolExecutionContext(session_id="session-1", hf_token=None)):
+            result = await experiment_workspace_handler(
+                {"operation": "run", "command": "python scripts/smoke.py"},
+                _settings(tmp_path),
+            )
+    assert "Error" in result
+    assert "token" in result.lower()
+
+
+@pytest.mark.asyncio
 async def test_write_calls_remote_workspace_with_control_plane_auth(tmp_path: Path) -> None:
     _write_record(tmp_path)
     captured: dict[str, object] = {}

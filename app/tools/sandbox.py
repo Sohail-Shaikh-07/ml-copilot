@@ -399,6 +399,10 @@ def _require_record(settings: AppSettings) -> SandboxRecord | str:
     return record
 
 
+def _require_remote_token() -> str | None:
+    return _require_token()
+
+
 def _sandbox_headers(record: SandboxRecord) -> dict[str, str]:
     headers = {"X-Sandbox-Authorization": f"Bearer {record.api_token}"}
     token = current_hf_token()
@@ -475,6 +479,8 @@ async def _write(args: dict[str, Any], settings: AppSettings) -> str:
     record = _require_record(settings)
     if isinstance(record, str):
         return record
+    if not _require_remote_token():
+        return "Error: A Hugging Face token is required to access the experiment workspace."
     try:
         path = _validate_remote_path(args.get("path"))
     except ValueError as exc:
@@ -498,6 +504,8 @@ async def _read(args: dict[str, Any], settings: AppSettings) -> str:
     record = _require_record(settings)
     if isinstance(record, str):
         return record
+    if not _require_remote_token():
+        return "Error: A Hugging Face token is required to access the experiment workspace."
     try:
         path = _validate_remote_path(args.get("path"))
         max_bytes = _normalize_max_bytes(args.get("max_bytes"))
@@ -522,6 +530,8 @@ async def _run(args: dict[str, Any], settings: AppSettings) -> str:
     record = _require_record(settings)
     if isinstance(record, str):
         return record
+    if not _require_remote_token():
+        return "Error: A Hugging Face token is required to access the experiment workspace."
     command = str(args.get("command") or "").strip()
     if not command:
         return "Error: command is required for run."
