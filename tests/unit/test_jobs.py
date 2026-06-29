@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import sys
 import types
 from pathlib import Path
@@ -132,9 +133,16 @@ def test_is_billing_error_detects_credit_messages() -> None:
     assert not _is_billing_error("invalid flavor")
 
 
-def test_build_python_command_for_url_and_inline() -> None:
+def test_build_python_command_for_url_file_and_inline() -> None:
     assert _build_python_command("https://example.com/train.py") == ["uv", "run", "https://example.com/train.py"]
-    assert _build_python_command("import torch") == ["uv", "run", "-"]
+    assert _build_python_command("train.py") == ["uv", "run", "train.py"]
+
+    inline_command = _build_python_command("import torch\nprint('hello')")
+    encoded = base64.b64encode("import torch\nprint('hello')".encode("utf-8")).decode("utf-8")
+
+    assert inline_command[:2] == ["/bin/sh", "-lc"]
+    assert encoded in inline_command[2]
+    assert "base64 -d | uv run -" in inline_command[2]
 
 
 def test_get_tool_specs() -> None:
@@ -146,6 +154,8 @@ def test_get_tool_specs() -> None:
     assert "script" in props
     assert "command" in props
     assert "job_id" in props
+    assert props["job_id"]["type"] == ["string", "array"]
+    assert props["job_id"]["items"] == {"type": "string"}
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +211,8 @@ async def test_run_python_job(tmp_path: Path) -> None:
     call = _FakeHfApi.instances[-1].run_job_calls[-1]
     assert call["flavor"] == "cpu-basic"
     assert call["timeout"] == "1h"
-    assert call["command"] == ["uv", "run", "-"]
+    assert call["command"][:2] == ["/bin/sh", "-lc"]
+    assert "base64 -d | uv run -" in call["command"][2]
     assert call["secrets"]["HF_TOKEN"] == "hf-session-token"
 
 
