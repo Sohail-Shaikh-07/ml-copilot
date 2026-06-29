@@ -929,7 +929,7 @@ def create_agent_loop(
 
 def _create_tool_registry(settings: AppSettings) -> ToolRegistry:
     """Create and populate the built-in and configured tool registry."""
-    from app.tools import datasets, docs, hub, mcp, papers, repo_analyzer, reporting, workspace
+    from app.tools import datasets, docs, hub, jobs, mcp, papers, repo_analyzer, reporting, workspace
 
     registry = ToolRegistry()
     workspace_specs = workspace.get_tool_specs()
@@ -969,6 +969,15 @@ def _create_tool_registry(settings: AppSettings) -> ToolRegistry:
             description=spec["description"],
             input_schema=spec.get("parameters", {"type": "object", "properties": {}}),
             handler=_make_hub_handler(spec["name"], settings),
+        )
+        registry.register(tool_spec)
+
+    for spec in jobs.get_tool_specs():
+        tool_spec = ToolSpec(
+            name=spec["name"],
+            description=spec["description"],
+            input_schema=spec.get("parameters", {"type": "object", "properties": {}}),
+            handler=_make_jobs_handler(settings),
         )
         registry.register(tool_spec)
 
@@ -1064,6 +1073,16 @@ def _make_hub_handler(name: str, settings: AppSettings) -> ToolHandler:
 
     async def _handler(args: dict[str, Any]) -> str:
         return await handlers[name](args, settings)
+
+    return _handler
+
+
+def _make_jobs_handler(settings: AppSettings) -> ToolHandler:
+    """Create a handler for the Hugging Face Jobs orchestration tool."""
+    from app.tools import jobs
+
+    async def _handler(args: dict[str, Any]) -> str:
+        return await jobs.manage_job_handler(args, settings)
 
     return _handler
 
