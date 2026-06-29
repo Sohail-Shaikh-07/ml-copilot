@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import shlex
 from typing import Any
 
 from app.config import AppSettings
@@ -227,13 +229,25 @@ async def _run_job(args: dict[str, Any]) -> str:
 
 def _build_python_command(script: str) -> list[str]:
     """Build a uv run command for an inline script, URL, or file path."""
+    script = script.strip()
     parts = ["uv", "run"]
     if script.startswith(("http://", "https://")):
         parts.append(script)
+    elif _looks_like_inline_script(script):
+        encoded = base64.b64encode(script.encode("utf-8")).decode("utf-8")
+        shell = f"printf %s {shlex.quote(encoded)} | base64 -d | uv run -"
+        return ["/bin/sh", "-lc", shell]
     else:
-        # Inline scripts are passed via stdin so the job never needs a file.
-        parts.append("-")
+        parts.append(script)
     return parts
+
+
+def _looks_like_inline_script(script: str) -> bool:
+    """Return true when a script value is Python source rather than a path/URL."""
+    if "\n" in script:
+        return True
+    stripped = script.lstrip()
+    return stripped.startswith(("import ", "from ", "print(", "def ", "class ", "if __name__"))
 
 
 async def _list_jobs(args: dict[str, Any]) -> str:
@@ -422,7 +436,8 @@ def get_tool_specs() -> list[dict[str, Any]]:
                         "description": "Optional namespace to run the job under (own account or an org).",
                     },
                     "job_id": {
-                        "type": "string",
+                        "type": ["string", "array"],
+                        "items": {"type": "string"},
                         "description": (
                             "Job ID. Required for inspect, logs, and cancel. A list is accepted for inspect."
                         ),
