@@ -12,6 +12,7 @@ import {
 import ApprovalDialog from './components/ApprovalDialog';
 import JobProgressPanel from './components/JobProgressPanel';
 import RichMessageContent from './components/RichMessageContent';
+import RuntimeDetailPanel from './components/RuntimeDetailPanel';
 import SessionSidebar from './components/SessionSidebar';
 import ToolTracePanel from './components/ToolTracePanel';
 import type {
@@ -488,6 +489,8 @@ function App() {
             />
 
             <JobProgressPanel toolCalls={toolCalls} />
+
+            <RuntimeDetailPanel toolCalls={toolCalls} />
 
             <ToolTracePanel
               liveEvents={liveEvents}
