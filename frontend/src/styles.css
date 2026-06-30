@@ -919,6 +919,180 @@ button {
   font-size: 0.76rem;
 }
 
+.tool-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background:
+    radial-gradient(circle at top left, rgba(56, 189, 248, 0.08), transparent 34%),
+    rgba(3, 7, 18, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.tool-card.success {
+  border-color: rgba(34, 197, 94, 0.24);
+}
+
+.tool-card.warning {
+  border-color: rgba(245, 158, 11, 0.26);
+}
+
+.tool-card.danger {
+  border-color: rgba(248, 113, 113, 0.28);
+}
+
+.tool-card-head,
+.tool-card-title-row,
+.tool-card-meta-row {
+  display: flex;
+  gap: 10px;
+}
+
+.tool-card-head {
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.tool-card-title-row {
+  min-width: 0;
+}
+
+.tool-card-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.tool-card-category {
+  display: block;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.tool-card h5 {
+  margin: 3px 0;
+  font-size: 0.96rem;
+  letter-spacing: -0.02em;
+}
+
+.tool-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.tool-card-metadata {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.tool-card-metadata div {
+  min-width: 0;
+  padding: 9px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.64);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.tool-card-metadata dt {
+  color: var(--muted);
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.tool-card-metadata dd {
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: var(--text);
+  font-family: monospace;
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-card-metadata a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.tool-card-metadata a:hover {
+  text-decoration: underline;
+}
+
+.tool-card-args {
+  font-family: monospace;
+  font-size: 0.78rem;
+}
+
+.tool-card-output {
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.58);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.tool-card-output.danger {
+  background: rgba(127, 29, 29, 0.16);
+  border-color: rgba(248, 113, 113, 0.16);
+}
+
+.tool-card-output span,
+.tool-card-details span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.tool-card-output p {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tool-card-meta-row {
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.tool-card-details-toggle {
+  justify-self: flex-start;
+}
+
+.tool-card-details {
+  display: grid;
+  gap: 10px;
+}
+
+.tool-card-details pre {
+  max-height: 280px;
+  margin: 0;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  background: rgba(2, 6, 23, 0.88);
+  color: #dbeafe;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
 .tool-trace-output {
   margin-top: 10px;
   padding-top: 10px;

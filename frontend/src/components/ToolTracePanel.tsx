@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react';
 import type {
   PendingApprovalPayload,
   SessionEventPayload,
@@ -11,6 +12,23 @@ interface ToolTracePanelProps {
   metrics: SessionMetricsSummary | null;
   toolCalls: ToolCallPayload[];
 }
+
+interface ToolMetadataItem {
+  label: string;
+  value: string;
+  href?: string;
+  linkLabel?: string;
+}
+
+interface ToolProfile {
+  category: string;
+  title: string;
+  description: string;
+  icon: string;
+  metadata: ToolMetadataItem[];
+}
+
+const PREVIEW_LIMIT = 520;
 
 function shortId(value: string) {
   return value.slice(0, 8);
@@ -32,6 +50,21 @@ function formatArgs(args: Record<string, unknown>) {
     .slice(0, 3)
     .map(([key, value]) => `${key}: ${formatValue(value)}`)
     .join(' | ');
+}
+
+function safeStringify(value: unknown) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function sentenceCase(value: string) {
+  return value
+    .replace(/^mcp__[^_]+__/, '')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function formatDuration(startedAt: string | null, finishedAt: string | null) {
@@ -61,7 +94,7 @@ function eventSummary(event: SessionEventPayload) {
   const error = event.data.error;
   if (typeof error === 'string' && error.trim()) return error;
 
-  const tool = event.data.tool;
+  const tool = event.data.tool ?? event.data.tool_name;
   if (typeof tool === 'string' && tool.trim()) return tool;
 
   return JSON.stringify(event.data);
@@ -114,6 +147,261 @@ function groupToolCalls(toolCalls: ToolCallPayload[]) {
   }
 
   return groups;
+}
+
+function textOutput(call: ToolCallPayload) {
+  return firstNonEmptyText(call.error, call.output);
+}
+
+function previewText(value: string) {
+  if (value.length <= PREVIEW_LIMIT) {
+    return { text: value, truncated: false };
+  }
+  return { text: `${value.slice(0, PREVIEW_LIMIT).trimEnd()}\n...`, truncated: true };
+}
+
+function getArgText(args: Record<string, unknown>, key: string) {
+  const value = args[key];
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return null;
+}
+
+function matchLine(text: string | null | undefined, pattern: RegExp) {
+  if (!text) return null;
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(pattern);
+    if (match?.[1]?.trim()) return match[1].trim();
+  }
+  return null;
+}
+
+function firstUrl(text: string | null | undefined) {
+  return text?.match(/https?:\/\/[^\s)]+/)?.[0] ?? null;
+}
+
+function addMetadata(items: ToolMetadataItem[], item: ToolMetadataItem | null) {
+  if (!item) return;
+  if (!item.value.trim()) return;
+  if (items.some((existing) => existing.label === item.label && existing.value === item.value)) return;
+  items.push(item);
+}
+
+function buildToolProfile(call: ToolCallPayload): ToolProfile {
+  const args = call.arguments;
+  const output = textOutput(call);
+  const metadata: ToolMetadataItem[] = [];
+  const operation = getArgText(args, 'operation');
+
+  if (operation) {
+    addMetadata(metadata, { label: 'Operation', value: operation });
+  }
+
+  switch (call.tool_name) {
+    case 'manage_job': {
+      const status = matchLine(output, /^Status:\s*(.+)$/i);
+      const hardware = getArgText(args, 'hardware') ?? matchLine(output, /^Hardware:\s*(.+)$/i);
+      const jobId = getArgText(args, 'job_id') ?? matchLine(output, /^Job(?: ID)?:\s*(.+)$/i);
+      const url = firstUrl(output);
+
+      if (status) addMetadata(metadata, { label: 'Status', value: status });
+      if (hardware) addMetadata(metadata, { label: 'Hardware', value: hardware });
+      if (jobId) addMetadata(metadata, { label: 'Job', value: jobId });
+      if (url) addMetadata(metadata, { label: 'Link', value: url, href: url, linkLabel: 'Open job' });
+
+      return {
+        category: 'Job orchestration',
+        title: 'Hugging Face job',
+        description: 'Run, inspect, stream logs, or cancel long-running Hugging Face Jobs.',
+        icon: '⚙️',
+        metadata,
+      };
+    }
+    case 'experiment_workspace': {
+      const path = getArgText(args, 'path') ?? getArgText(args, 'workspace_path');
+      const command = getArgText(args, 'command');
+      const sandboxId = getArgText(args, 'sandbox_id');
+
+      if (command) addMetadata(metadata, { label: 'Command', value: command });
+      if (path) addMetadata(metadata, { label: 'Path', value: path });
+      if (sandboxId) addMetadata(metadata, { label: 'Sandbox', value: sandboxId });
+
+      return {
+        category: 'Sandbox runtime',
+        title: 'Experiment workspace',
+        description: 'Create, inspect, run, and tear down sandboxed experiment workspaces.',
+        icon: '🧪',
+        metadata,
+      };
+    }
+    case 'manage_experiment_loop': {
+      const targetMetric = getArgText(args, 'target_metric');
+      const maxAttempts = getArgText(args, 'max_attempts');
+
+      if (targetMetric) addMetadata(metadata, { label: 'Target', value: targetMetric });
+      if (maxAttempts) addMetadata(metadata, { label: 'Max attempts', value: maxAttempts });
+
+      return {
+        category: 'Experiment loop',
+        title: 'Autonomous experiment loop',
+        description: 'Track attempts, diagnose failures, and decide the next ML experiment action.',
+        icon: '🔁',
+        metadata,
+      };
+    }
+    case 'publish_model_report': {
+      const outputDir = getArgText(args, 'output_dir');
+      const repoId = getArgText(args, 'repo_id');
+
+      if (outputDir) addMetadata(metadata, { label: 'Output', value: outputDir });
+      if (repoId) addMetadata(metadata, { label: 'Repository', value: repoId });
+
+      return {
+        category: 'Publishing',
+        title: 'Model report',
+        description: 'Prepare model cards, final reports, manifests, and optional Hub publishing.',
+        icon: '🚀',
+        metadata,
+      };
+    }
+    case 'hf_papers':
+      addMetadata(metadata, { label: 'Query', value: getArgText(args, 'query') ?? getArgText(args, 'arxiv_id') ?? '' });
+      return {
+        category: 'Research',
+        title: 'Paper search',
+        description: 'Search, inspect, and connect papers, citations, datasets, and models.',
+        icon: '📄',
+        metadata,
+      };
+    case 'fetch_hf_docs':
+    case 'explore_hf_docs':
+    case 'find_hf_api':
+      addMetadata(metadata, { label: 'Topic', value: getArgText(args, 'query') ?? getArgText(args, 'url') ?? '' });
+      return {
+        category: 'Documentation',
+        title: sentenceCase(call.tool_name),
+        description: 'Read Hugging Face documentation and API guidance.',
+        icon: '📚',
+        metadata,
+      };
+    case 'hf_inspect_dataset':
+    case 'hf_repo_files':
+    case 'hf_search_hub':
+      addMetadata(metadata, {
+        label: 'Resource',
+        value: getArgText(args, 'dataset') ?? getArgText(args, 'repo_id') ?? getArgText(args, 'query') ?? '',
+      });
+      return {
+        category: 'Hub operation',
+        title: sentenceCase(call.tool_name),
+        description: 'Inspect Hugging Face Hub resources and repository metadata.',
+        icon: '🤗',
+        metadata,
+      };
+    case 'analyze_repository':
+      addMetadata(metadata, { label: 'Path', value: getArgText(args, 'path') ?? '' });
+      return {
+        category: 'Repository analysis',
+        title: 'Repository analyzer',
+        description: 'Review project files, ML structure, dependency gaps, and reproducibility signals.',
+        icon: '🧭',
+        metadata,
+      };
+    default:
+      return {
+        category: call.tool_name.startsWith('mcp__') ? 'External integration' : 'Workspace tool',
+        title: sentenceCase(call.tool_name),
+        description: 'Tool call captured from the persisted session trace.',
+        icon: '🛠️',
+        metadata,
+      };
+  }
+}
+
+function ToolCallCard({ call }: { call: ToolCallPayload }) {
+  const [expanded, setExpanded] = useState(false);
+  const profile = useMemo(() => buildToolProfile(call), [call]);
+  const duration = formatDuration(call.started_at, call.finished_at);
+  const resultText = textOutput(call) ?? 'Waiting for output';
+  const resultPreview = previewText(resultText);
+  const resultLabel = call.success === false || call.error ? 'Error' : 'Output';
+  const statusTone = toneForStatus(call.status);
+  const showDetails = expanded || resultPreview.truncated || Object.keys(call.arguments).length > 0;
+
+  return (
+    <article className={`tool-card ${statusTone}`} data-testid={`tool-card-${call.id}`}>
+      <div className="tool-card-head">
+        <div className="tool-card-title-row">
+          <span className="tool-card-icon" aria-hidden="true">
+            {profile.icon}
+          </span>
+          <div>
+            <span className="tool-card-category">{profile.category}</span>
+            <h5>{profile.title}</h5>
+            <p>{profile.description}</p>
+          </div>
+        </div>
+        <span className={`status-chip ${statusTone}`}>{call.status}</span>
+      </div>
+
+      {profile.metadata.length ? (
+        <dl className="tool-card-metadata">
+          {profile.metadata.map((item) => (
+            <div key={`${item.label}-${item.value}`}>
+              <dt>{item.label}</dt>
+              <dd>
+                {item.href ? (
+                  <a href={item.href} rel="noopener noreferrer" target="_blank">
+                    {item.linkLabel ?? item.value}
+                  </a>
+                ) : (
+                  item.value
+                )}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="tool-card-args">{formatArgs(call.arguments)}</p>
+      )}
+
+      <div className={`tool-card-output ${call.success === false || call.error ? 'danger' : ''}`}>
+        <span>{resultLabel}</span>
+        <p>{resultPreview.text}</p>
+      </div>
+
+      <div className="tool-card-meta-row">
+        <span>{call.requires_approval ? 'approval required' : 'no approval required'}</span>
+        {duration ? <span>{duration}</span> : null}
+        {call.approval_id ? <span>approval {shortId(call.approval_id)}</span> : null}
+      </div>
+
+      {showDetails ? (
+        <button
+          className="ghost-button tool-card-details-toggle"
+          type="button"
+          aria-label={`${expanded ? 'Hide' : 'Show'} details for ${profile.title}`}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? 'Hide details' : 'Show details'}
+        </button>
+      ) : null}
+
+      {expanded ? (
+        <div className="tool-card-details">
+          <div>
+            <span>Arguments</span>
+            <pre>{safeStringify(call.arguments)}</pre>
+          </div>
+          <div>
+            <span>{resultLabel}</span>
+            <pre>{resultText}</pre>
+          </div>
+        </div>
+      ) : null}
+    </article>
+  );
 }
 
 export default function ToolTracePanel({ liveEvents, pendingApprovals, metrics, toolCalls }: ToolTracePanelProps) {
@@ -185,32 +473,9 @@ export default function ToolTracePanel({ liveEvents, pendingApprovals, metrics, 
                 </div>
 
                 <div className="tool-trace-call-list">
-                  {group.calls.map((call) => {
-                    const duration = formatDuration(call.started_at, call.finished_at);
-                    const summary = firstNonEmptyText(call.output, call.error) ?? 'Waiting for output';
-                    return (
-                      <div key={call.id} className="tool-trace-call">
-                        <div className="tool-trace-call-head">
-                          <div>
-                            <strong>{call.tool_name}</strong>
-                            <p>{formatArgs(call.arguments)}</p>
-                          </div>
-                          <span className={`status-chip ${toneForStatus(call.status)}`}>{call.status}</span>
-                        </div>
-
-                        <div className="tool-trace-call-meta">
-                          <span>{call.requires_approval ? 'approval required' : 'no approval required'}</span>
-                          {duration ? <span>{duration}</span> : null}
-                          {call.approval_id ? <span>approval {shortId(call.approval_id)}</span> : null}
-                        </div>
-
-                        <div className="tool-trace-output">
-                          <span>{call.success === false ? 'Error' : 'Output'}</span>
-                          <p>{summary}</p>
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {group.calls.map((call) => (
+                    <ToolCallCard key={call.id} call={call} />
+                  ))}
                 </div>
               </article>
             ))}
