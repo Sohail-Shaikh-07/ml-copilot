@@ -289,4 +289,3 @@ gh pr view <pr> --json assignees,labels,closingIssuesReferences
 ```
 
 Then watch CI and post the required `Code review` comment.
-
