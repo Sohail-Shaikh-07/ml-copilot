@@ -10,6 +10,7 @@ import {
   sendChatMessage,
 } from './api';
 import ApprovalDialog from './components/ApprovalDialog';
+import JobProgressPanel from './components/JobProgressPanel';
 import RichMessageContent from './components/RichMessageContent';
 import SessionSidebar from './components/SessionSidebar';
 import ToolTracePanel from './components/ToolTracePanel';
@@ -485,6 +486,8 @@ function App() {
               resolving={resolvingApproval}
               onResolve={handleResolveApproval}
             />
+
+            <JobProgressPanel toolCalls={toolCalls} />
 
             <ToolTracePanel
               liveEvents={liveEvents}
