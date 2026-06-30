@@ -10,6 +10,7 @@ import {
   sendChatMessage,
 } from './api';
 import ApprovalDialog from './components/ApprovalDialog';
+import RichMessageContent from './components/RichMessageContent';
 import SessionSidebar from './components/SessionSidebar';
 import ToolTracePanel from './components/ToolTracePanel';
 import type {
@@ -412,7 +413,11 @@ function App() {
                         <span>{roleLabel(message.role)}</span>
                         <span>{formatTimestamp(message.created_at)}</span>
                       </div>
-                      <p>{message.content}</p>
+                      {message.role === 'assistant' || message.role === 'system' ? (
+                        <RichMessageContent content={message.content} />
+                      ) : (
+                        <p>{message.content}</p>
+                      )}
                     </article>
                   ))
                 )}
@@ -422,7 +427,7 @@ function App() {
                       <span>Assistant streaming</span>
                       <span>live</span>
                     </div>
-                    <p>{liveAssistantText}</p>
+                    <RichMessageContent content={liveAssistantText} isStreaming />
                   </article>
                 ) : null}
               </div>

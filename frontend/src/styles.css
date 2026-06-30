@@ -470,6 +470,192 @@ button {
   background: rgba(69, 26, 3, 0.42);
 }
 
+.rich-message-content {
+  margin-top: 10px;
+  color: #dce7f7;
+  line-height: 1.68;
+  overflow-wrap: anywhere;
+}
+
+.rich-message-content.streaming::after {
+  content: '';
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  margin-left: 4px;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.82);
+  vertical-align: -0.15em;
+  animation: pulse-cursor 1s ease-in-out infinite;
+}
+
+.rich-message-content > :first-child {
+  margin-top: 0;
+}
+
+.rich-message-content > :last-child {
+  margin-bottom: 0;
+}
+
+.rich-message-content p,
+.rich-message-content ul,
+.rich-message-content ol,
+.rich-message-content blockquote,
+.rich-message-content table,
+.rich-code-block {
+  margin: 0 0 14px;
+}
+
+.rich-message-content h1,
+.rich-message-content h2,
+.rich-message-content h3,
+.rich-message-content h4 {
+  margin: 18px 0 10px;
+  color: var(--text);
+  letter-spacing: -0.03em;
+  line-height: 1.25;
+}
+
+.rich-message-content h1 {
+  font-size: 1.35rem;
+}
+
+.rich-message-content h2 {
+  font-size: 1.16rem;
+}
+
+.rich-message-content h3 {
+  font-size: 1.02rem;
+}
+
+.rich-message-content ul,
+.rich-message-content ol {
+  padding-left: 1.35rem;
+}
+
+.rich-message-content li {
+  margin: 6px 0;
+}
+
+.rich-message-content a {
+  color: #7dd3fc;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.rich-message-content a:hover {
+  text-decoration: underline;
+}
+
+.rich-message-content blockquote {
+  padding: 10px 14px;
+  border-left: 3px solid rgba(56, 189, 248, 0.72);
+  border-radius: 0 14px 14px 0;
+  background: rgba(56, 189, 248, 0.08);
+  color: #c7d2fe;
+}
+
+.rich-message-content code {
+  padding: 2px 6px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.55);
+  color: #e0f2fe;
+  font-family: "JetBrains Mono", "Cascadia Code", monospace;
+  font-size: 0.86em;
+}
+
+.rich-code-block {
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 18px;
+  background: rgba(2, 6, 23, 0.68);
+}
+
+.rich-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px 8px 14px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  color: var(--muted);
+  font-family: "JetBrains Mono", "Cascadia Code", monospace;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.rich-copy-button,
+.rich-expand-button {
+  padding: 7px 10px;
+  font-size: 0.75rem;
+}
+
+.rich-code-block pre {
+  max-width: 100%;
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+}
+
+.rich-code-block pre code {
+  display: block;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #dbeafe;
+  white-space: pre;
+}
+
+.rich-message-content table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 16px;
+}
+
+.rich-message-content th,
+.rich-message-content td {
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  text-align: left;
+}
+
+.rich-message-content th {
+  background: rgba(56, 189, 248, 0.1);
+  color: var(--text);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.rich-message-content tr:last-child td {
+  border-bottom: 0;
+}
+
+.rich-message-content tr:nth-child(even) td {
+  background: rgba(148, 163, 184, 0.05);
+}
+
+.rich-expand-button {
+  margin-top: 2px;
+}
+
+@keyframes pulse-cursor {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
 .message-meta {
   font-size: 0.78rem;
   color: var(--muted);
