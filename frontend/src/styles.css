@@ -1267,6 +1267,193 @@ button {
   font-size: 0.72rem;
 }
 
+.runtime-detail-panel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.74), rgba(2, 6, 23, 0.8));
+}
+
+.runtime-detail-header,
+.runtime-detail-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.runtime-detail-header h3,
+.runtime-detail-card-head h4 {
+  margin: 4px 0;
+  letter-spacing: -0.03em;
+}
+
+.runtime-detail-counts,
+.runtime-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.runtime-detail-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.runtime-detail-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 18px;
+  background: rgba(3, 7, 18, 0.72);
+}
+
+.runtime-detail-card-head span,
+.runtime-command-list strong,
+.runtime-detail-list strong {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.runtime-detail-card-head a {
+  color: var(--accent);
+  font-size: 0.82rem;
+  text-decoration: none;
+}
+
+.runtime-detail-card-head a:hover {
+  text-decoration: underline;
+}
+
+.runtime-detail-metadata {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.runtime-detail-metadata div,
+.runtime-artifact {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.58);
+}
+
+.runtime-detail-metadata dt,
+.runtime-artifact span,
+.runtime-artifact small {
+  color: var(--muted);
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.runtime-detail-metadata dd {
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: var(--text);
+  font-family: monospace;
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-detail-list,
+.runtime-command-list {
+  display: grid;
+  gap: 8px;
+}
+
+.runtime-detail-list span {
+  width: fit-content;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 6px 8px;
+  border: 1px solid rgba(96, 165, 250, 0.18);
+  border-radius: 999px;
+  background: rgba(30, 64, 175, 0.18);
+  color: #dbeafe;
+  font-family: monospace;
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+}
+
+.runtime-command {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.58);
+}
+
+.runtime-command.failed {
+  border-color: rgba(248, 113, 113, 0.26);
+  background: rgba(127, 29, 29, 0.18);
+}
+
+.runtime-command span {
+  color: #dbeafe;
+  font-family: monospace;
+  font-size: 0.78rem;
+}
+
+.runtime-command pre,
+.runtime-command-list pre {
+  max-height: 180px;
+  margin: 0;
+  overflow: auto;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(2, 6, 23, 0.9);
+  color: #dbeafe;
+  font-size: 0.76rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.runtime-detail-actions {
+  justify-content: flex-start;
+}
+
+.runtime-detail-actions code {
+  padding: 6px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.7);
+  color: #dbeafe;
+  font-size: 0.72rem;
+}
+
+.runtime-artifact-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.runtime-artifact {
+  display: grid;
+  gap: 4px;
+}
+
+.runtime-artifact strong {
+  overflow: hidden;
+  color: var(--text);
+  font-family: monospace;
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tool-trace-output {
   margin-top: 10px;
   padding-top: 10px;

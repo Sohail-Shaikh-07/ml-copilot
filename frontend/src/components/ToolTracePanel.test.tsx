@@ -118,6 +118,10 @@ describe('ToolTracePanel', () => {
     const sandboxCard = screen.getByTestId('tool-card-sandbox-call');
     expect(within(sandboxCard).getByText('Sandbox runtime')).toBeInTheDocument();
     expect(within(sandboxCard).getByText('Command failed with CUDA out of memory while training.')).toBeInTheDocument();
+    expect(within(sandboxCard).getByRole('link', { name: 'Open runtime panel' })).toHaveAttribute(
+      'href',
+      '#runtime-details',
+    );
 
     const publishCard = screen.getByTestId('tool-card-publish-call');
     expect(within(publishCard).getByText('Publishing')).toBeInTheDocument();

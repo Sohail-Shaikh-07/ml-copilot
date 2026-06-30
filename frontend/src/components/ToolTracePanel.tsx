@@ -188,6 +188,15 @@ function addMetadata(items: ToolMetadataItem[], item: ToolMetadataItem | null) {
   items.push(item);
 }
 
+function addRuntimePanelLink(items: ToolMetadataItem[]) {
+  addMetadata(items, {
+    label: 'Runtime',
+    value: 'Runtime panel',
+    href: '#runtime-details',
+    linkLabel: 'Open runtime panel',
+  });
+}
+
 function buildToolProfile(call: ToolCallPayload): ToolProfile {
   const args = call.arguments;
   const output = textOutput(call);
@@ -209,6 +218,7 @@ function buildToolProfile(call: ToolCallPayload): ToolProfile {
       if (hardware) addMetadata(metadata, { label: 'Hardware', value: hardware });
       if (jobId) addMetadata(metadata, { label: 'Job', value: jobId });
       if (url) addMetadata(metadata, { label: 'Link', value: url, href: url, linkLabel: 'Open job' });
+      addRuntimePanelLink(metadata);
 
       return {
         category: 'Job orchestration',
@@ -226,6 +236,7 @@ function buildToolProfile(call: ToolCallPayload): ToolProfile {
       if (command) addMetadata(metadata, { label: 'Command', value: command });
       if (path) addMetadata(metadata, { label: 'Path', value: path });
       if (sandboxId) addMetadata(metadata, { label: 'Sandbox', value: sandboxId });
+      addRuntimePanelLink(metadata);
 
       return {
         category: 'Sandbox runtime',
@@ -256,6 +267,7 @@ function buildToolProfile(call: ToolCallPayload): ToolProfile {
 
       if (outputDir) addMetadata(metadata, { label: 'Output', value: outputDir });
       if (repoId) addMetadata(metadata, { label: 'Repository', value: repoId });
+      addRuntimePanelLink(metadata);
 
       return {
         category: 'Publishing',
