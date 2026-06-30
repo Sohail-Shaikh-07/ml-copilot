@@ -197,6 +197,15 @@ function addRuntimePanelLink(items: ToolMetadataItem[]) {
   });
 }
 
+function addArtifactBrowserLink(items: ToolMetadataItem[]) {
+  addMetadata(items, {
+    label: 'Artifacts',
+    value: 'Artifact browser',
+    href: '#artifact-browser',
+    linkLabel: 'Open artifact browser',
+  });
+}
+
 function buildToolProfile(call: ToolCallPayload): ToolProfile {
   const args = call.arguments;
   const output = textOutput(call);
@@ -237,6 +246,7 @@ function buildToolProfile(call: ToolCallPayload): ToolProfile {
       if (path) addMetadata(metadata, { label: 'Path', value: path });
       if (sandboxId) addMetadata(metadata, { label: 'Sandbox', value: sandboxId });
       addRuntimePanelLink(metadata);
+      addArtifactBrowserLink(metadata);
 
       return {
         category: 'Sandbox runtime',
@@ -268,6 +278,7 @@ function buildToolProfile(call: ToolCallPayload): ToolProfile {
       if (outputDir) addMetadata(metadata, { label: 'Output', value: outputDir });
       if (repoId) addMetadata(metadata, { label: 'Repository', value: repoId });
       addRuntimePanelLink(metadata);
+      addArtifactBrowserLink(metadata);
 
       return {
         category: 'Publishing',
@@ -304,6 +315,7 @@ function buildToolProfile(call: ToolCallPayload): ToolProfile {
         label: 'Resource',
         value: getArgText(args, 'dataset') ?? getArgText(args, 'repo_id') ?? getArgText(args, 'query') ?? '',
       });
+      addArtifactBrowserLink(metadata);
       return {
         category: 'Hub operation',
         title: sentenceCase(call.tool_name),
@@ -313,6 +325,7 @@ function buildToolProfile(call: ToolCallPayload): ToolProfile {
       };
     case 'analyze_repository':
       addMetadata(metadata, { label: 'Path', value: getArgText(args, 'path') ?? '' });
+      addArtifactBrowserLink(metadata);
       return {
         category: 'Repository analysis',
         title: 'Repository analyzer',
