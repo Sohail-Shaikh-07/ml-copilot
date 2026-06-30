@@ -1624,6 +1624,100 @@ button {
   white-space: nowrap;
 }
 
+.artifact-browser-panel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 22px;
+  background: rgba(15, 23, 42, 0.58);
+}
+
+.artifact-browser-header,
+.artifact-browser-layout {
+  display: grid;
+  gap: 14px;
+}
+
+.artifact-browser-list {
+  display: grid;
+  gap: 10px;
+}
+
+.artifact-browser-item,
+.artifact-browser-preview {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(96, 165, 250, 0.14);
+  border-radius: 16px;
+  background: rgba(3, 7, 18, 0.7);
+}
+
+.artifact-browser-item.blocked {
+  border-color: rgba(251, 191, 36, 0.22);
+  background: rgba(120, 53, 15, 0.16);
+}
+
+.artifact-browser-item strong {
+  display: block;
+  margin-top: 6px;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.artifact-browser-item code,
+.artifact-browser-preview > code {
+  overflow: hidden;
+  color: #dbeafe;
+  font-family: monospace;
+  font-size: 0.74rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-browser-item dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.artifact-browser-item dt {
+  color: var(--muted);
+  font-size: 0.64rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.artifact-browser-item dd {
+  margin: 3px 0 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-browser-warning {
+  margin: 0;
+  color: #fcd34d;
+  font-size: 0.78rem;
+}
+
+.artifact-browser-preview pre {
+  max-height: 260px;
+  margin: 0;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(2, 6, 23, 0.92);
+  color: #dbeafe;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
 .tool-trace-output {
   margin-top: 10px;
   padding-top: 10px;

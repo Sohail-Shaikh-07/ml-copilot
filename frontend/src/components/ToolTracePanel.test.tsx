@@ -122,9 +122,17 @@ describe('ToolTracePanel', () => {
       'href',
       '#runtime-details',
     );
+    expect(within(sandboxCard).getByRole('link', { name: 'Open artifact browser' })).toHaveAttribute(
+      'href',
+      '#artifact-browser',
+    );
 
     const publishCard = screen.getByTestId('tool-card-publish-call');
     expect(within(publishCard).getByText('Publishing')).toBeInTheDocument();
     expect(within(publishCard).getByText('.ml-copilot/reports/model-a')).toBeInTheDocument();
+    expect(within(publishCard).getByRole('link', { name: 'Open artifact browser' })).toHaveAttribute(
+      'href',
+      '#artifact-browser',
+    );
   });
 });
