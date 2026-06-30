@@ -1,10 +1,24 @@
 import { useState, type FormEvent } from 'react';
 import { uploadDataset } from '../api';
+import {
+  EFFORT_OPTIONS,
+  OPERATING_MODE_OPTIONS,
+  PROVIDER_OPTIONS,
+  providerLabel,
+  readStoredAgentControls,
+  suggestedModelForProvider,
+  suggestedModelLabelForProvider,
+  type OperatingMode,
+  type ProviderId,
+  type ReasoningEffort,
+  type SessionControlState,
+} from '../sessionControls';
 import type { MessagePayload, SessionDetail, SessionSummary } from '../types';
 
 interface SessionSidebarProps {
   activeSession: SessionDetail | null;
   creating: boolean;
+  draftControls: SessionControlState;
   draftHfToken: string;
   draftModel: string;
   draftTitle: string;
@@ -14,6 +28,7 @@ interface SessionSidebarProps {
   onSelectSession: (sessionId: string) => void;
   selectedSessionId: string | null;
   sessions: SessionSummary[];
+  setDraftControls: (value: SessionControlState) => void;
   setDraftHfToken: (value: string) => void;
   setDraftModel: (value: string) => void;
   setDraftTitle: (value: string) => void;
@@ -62,6 +77,7 @@ function roleLabel(role: string) {
 export default function SessionSidebar({
   activeSession,
   creating,
+  draftControls,
   draftHfToken,
   draftModel,
   draftTitle,
@@ -71,6 +87,7 @@ export default function SessionSidebar({
   onSelectSession,
   selectedSessionId,
   sessions,
+  setDraftControls,
   setDraftHfToken,
   setDraftModel,
   setDraftTitle,
@@ -81,6 +98,11 @@ export default function SessionSidebar({
   const isCurrentSession = Boolean(activeSession && activeSession.id === selectedSessionId);
   const currentSession = isCurrentSession ? activeSession : null;
   const recentMessages = isCurrentSession ? [...messages].slice(-3) : [];
+  const selectedControls = currentSession ? readStoredAgentControls(currentSession.metadata) : null;
+
+  function updateDraftControls(patch: Partial<SessionControlState>) {
+    setDraftControls({ ...draftControls, ...patch });
+  }
 
   async function handleDatasetUpload() {
     if (!datasetFile) return;
@@ -118,14 +140,113 @@ export default function SessionSidebar({
             placeholder="Plan a dataset audit"
           />
         </label>
-        <label>
-          Model
-          <input
-            value={draftModel}
-            onChange={(event) => setDraftModel(event.target.value)}
-            placeholder="gpt-5.4"
-          />
-        </label>
+        <section className="model-control-card" aria-label="Model and provider controls">
+          <div>
+            <p className="panel-label">Agent controls</p>
+            <strong>Model and provider</strong>
+            <p className="hint">
+              Saved with the session so runs reopen with predictable provider, effort, and budget preferences.
+            </p>
+          </div>
+          <div className="model-control-grid">
+            <label>
+              Provider
+              <select
+                value={draftControls.provider}
+                onChange={(event) => updateDraftControls({ provider: event.target.value as ProviderId })}
+              >
+                {PROVIDER_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Model
+              <input
+                value={draftModel}
+                onChange={(event) => setDraftModel(event.target.value)}
+                placeholder={suggestedModelForProvider(draftControls.provider)}
+              />
+            </label>
+          </div>
+          <div className="model-preset-row">
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={() => setDraftModel(suggestedModelForProvider(draftControls.provider))}
+            >
+              Use {suggestedModelLabelForProvider(draftControls.provider)}
+            </button>
+            <span className="hint">Custom model IDs stay editable for OpenAI-compatible and routed providers.</span>
+          </div>
+          <div className="model-control-grid">
+            <label>
+              Reasoning effort
+              <select
+                value={draftControls.reasoningEffort}
+                onChange={(event) => updateDraftControls({ reasoningEffort: event.target.value as ReasoningEffort })}
+              >
+                {EFFORT_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Operating mode
+              <select
+                value={draftControls.operatingMode}
+                onChange={(event) => updateDraftControls({ operatingMode: event.target.value as OperatingMode })}
+              >
+                {OPERATING_MODE_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Temperature
+              <input
+                type="number"
+                min="0"
+                max="2"
+                step="0.1"
+                value={draftControls.temperature}
+                onChange={(event) => updateDraftControls({ temperature: event.target.value })}
+                placeholder="0.2"
+              />
+            </label>
+            <label>
+              Max turns
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={draftControls.maxTurns}
+                onChange={(event) => updateDraftControls({ maxTurns: event.target.value })}
+                placeholder="120"
+              />
+            </label>
+            <label>
+              Spend cap
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={draftControls.spendCapUsd}
+                onChange={(event) => updateDraftControls({ spendCapUsd: event.target.value })}
+                placeholder="3.50"
+              />
+            </label>
+          </div>
+          <p className="hint">
+            Unsupported backend controls are treated as transparent preferences in this slice, not hidden enforcement.
+          </p>
+        </section>
         <label>
           Hugging Face token
           <input
@@ -212,6 +333,16 @@ export default function SessionSidebar({
                 <span>{shortId(currentSession.id)}</span>
               </div>
               <p>{currentSession.model}</p>
+              {selectedControls ? (
+                <div className="session-control-summary" data-testid="selected-session-controls">
+                  <span>Provider: {providerLabel(selectedControls.provider)}</span>
+                  <span>Effort: {selectedControls.reasoning_effort}</span>
+                  <span>Mode: {selectedControls.operating_mode}</span>
+                  {selectedControls.spend_cap_usd !== null ? (
+                    <span>Spend cap: {formatCurrency(selectedControls.spend_cap_usd)}</span>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="session-card-meta">
                 <span>{currentSession.message_count} messages</span>
                 <span>{currentSession.event_count} events</span>

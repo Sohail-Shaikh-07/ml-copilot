@@ -38,6 +38,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -306,6 +307,7 @@ button {
 }
 
 .composer-card input,
+.composer-card select,
 .composer-shell textarea {
   width: 100%;
   border-radius: 14px;
@@ -317,9 +319,44 @@ button {
 }
 
 .composer-card input:focus,
+.composer-card select:focus,
 .composer-shell textarea:focus {
   border-color: rgba(56, 189, 248, 0.45);
   box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.14);
+}
+
+.model-control-card {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(56, 189, 248, 0.16);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at top right, rgba(56, 189, 248, 0.12), transparent 36%),
+    rgba(3, 7, 18, 0.58);
+}
+
+.model-control-card strong {
+  display: block;
+  margin-top: 4px;
+  letter-spacing: -0.02em;
+}
+
+.model-control-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 10px;
+}
+
+.model-preset-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.model-preset-row .ghost-button {
+  white-space: nowrap;
 }
 
 .session-list,
@@ -381,6 +418,23 @@ button {
   font-size: 0.76rem;
   color: var(--muted);
   flex-wrap: wrap;
+}
+
+.session-control-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.session-control-summary span {
+  display: inline-flex;
+  padding: 6px 8px;
+  border: 1px solid rgba(56, 189, 248, 0.14);
+  border-radius: 999px;
+  background: rgba(14, 116, 144, 0.12);
+  color: #bfdbfe;
+  font-size: 0.72rem;
 }
 
 .session-history-card {

@@ -14,6 +14,11 @@ import JobProgressPanel from './components/JobProgressPanel';
 import RichMessageContent from './components/RichMessageContent';
 import RuntimeDetailPanel from './components/RuntimeDetailPanel';
 import SessionSidebar from './components/SessionSidebar';
+import {
+  DEFAULT_SESSION_CONTROLS,
+  buildSessionMetadata,
+  type SessionControlState,
+} from './sessionControls';
 import ToolTracePanel from './components/ToolTracePanel';
 import type {
   ApprovalDecisionRequest,
@@ -28,7 +33,7 @@ import type {
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 type StreamState = 'idle' | 'connecting' | 'streaming' | 'closed' | 'error';
 
-const seedMetadata = { source: 'frontend-shell' };
+const sessionMetadataSource = 'frontend-shell';
 const terminalEventTypes = new Set(['turn_complete', 'approval_required', 'error', 'interrupted']);
 
 function formatTimestamp(value: string) {
@@ -97,6 +102,7 @@ function App() {
   const [resolvingApproval, setResolvingApproval] = useState(false);
   const [draftTitle, setDraftTitle] = useState('');
   const [draftModel, setDraftModel] = useState('');
+  const [draftControls, setDraftControls] = useState<SessionControlState>(DEFAULT_SESSION_CONTROLS);
   const [draftHfToken, setDraftHfToken] = useState('');
   const [draftPrompt, setDraftPrompt] = useState('');
 
@@ -219,7 +225,7 @@ function App() {
       const created = await createSession({
         title: draftTitle.trim() || null,
         model: draftModel.trim() || null,
-        metadata: seedMetadata,
+        metadata: buildSessionMetadata(sessionMetadataSource, draftControls),
       }, draftHfToken.trim() || null);
       setSessions((current) => [created, ...current.filter((session) => session.id !== created.id)]);
       setSelectedSessionId(created.id);
@@ -363,6 +369,7 @@ function App() {
           <SessionSidebar
             activeSession={activeSession}
             creating={creating}
+            draftControls={draftControls}
             draftModel={draftModel}
             draftHfToken={draftHfToken}
             draftTitle={draftTitle}
@@ -372,6 +379,7 @@ function App() {
             onSelectSession={setSelectedSessionId}
             selectedSessionId={selectedSessionId}
             sessions={sessions}
+            setDraftControls={setDraftControls}
             setDraftModel={setDraftModel}
             setDraftHfToken={setDraftHfToken}
             setDraftTitle={setDraftTitle}
