@@ -1321,6 +1321,122 @@ button {
   font-size: 0.72rem;
 }
 
+.usage-meter-panel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(34, 197, 94, 0.18);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top right, rgba(34, 197, 94, 0.1), transparent 36%),
+    rgba(8, 15, 28, 0.9);
+}
+
+.usage-meter-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.usage-meter-header h3 {
+  margin: 4px 0;
+  letter-spacing: -0.03em;
+}
+
+.usage-meter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(124px, 1fr));
+  gap: 10px;
+}
+
+.usage-meter-card {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 16px;
+  background: rgba(3, 7, 18, 0.66);
+}
+
+.usage-meter-card span,
+.usage-meter-warning span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.usage-meter-card strong {
+  font-size: 1rem;
+  letter-spacing: -0.02em;
+}
+
+.usage-meter-card p,
+.usage-meter-warning p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.usage-meter-progress {
+  overflow: hidden;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+}
+
+.usage-meter-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--success), var(--warning));
+}
+
+.usage-meter-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.usage-meter-breakdown-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  border: 1px solid rgba(34, 197, 94, 0.16);
+  border-radius: 999px;
+  background: rgba(20, 83, 45, 0.18);
+  color: #bbf7d0;
+  font-size: 0.72rem;
+}
+
+.usage-meter-breakdown-item span {
+  color: var(--text);
+  font-family: monospace;
+}
+
+.usage-meter-warning {
+  display: grid;
+  gap: 7px;
+  padding: 12px;
+  border: 1px solid rgba(245, 158, 11, 0.24);
+  border-radius: 16px;
+  background: rgba(120, 53, 15, 0.2);
+}
+
+.usage-meter-warning a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.usage-meter-warning a:hover {
+  text-decoration: underline;
+}
+
 .runtime-detail-panel {
   display: grid;
   gap: 14px;

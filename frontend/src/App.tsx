@@ -20,6 +20,7 @@ import {
   type SessionControlState,
 } from './sessionControls';
 import ToolTracePanel from './components/ToolTracePanel';
+import UsageMeterPanel from './components/UsageMeterPanel';
 import type {
   ApprovalDecisionRequest,
   MessagePayload,
@@ -497,6 +498,8 @@ function App() {
             />
 
             <JobProgressPanel toolCalls={toolCalls} />
+
+            <UsageMeterPanel session={activeSession} toolCalls={toolCalls} />
 
             <RuntimeDetailPanel toolCalls={toolCalls} />
 
