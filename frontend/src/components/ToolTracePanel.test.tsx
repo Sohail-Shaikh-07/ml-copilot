@@ -95,6 +95,12 @@ describe('ToolTracePanel', () => {
             arguments: { output_dir: '.ml-copilot/reports/model-a' },
             output: 'Prepared README.md, FINAL_REPORT.md, and publish_manifest.json.',
           }),
+          toolCall({
+            id: 'research-call',
+            tool_name: 'paper_details',
+            arguments: { arxiv_id: '2401.12345' },
+            output: '# Efficient Fine-Tuning\nhttps://arxiv.org/abs/2401.12345',
+          }),
         ]}
       />,
     );
@@ -137,6 +143,12 @@ describe('ToolTracePanel', () => {
     expect(within(publishCard).getByRole('link', { name: 'Open artifact browser' })).toHaveAttribute(
       'href',
       '#artifact-browser',
+    );
+
+    const researchCard = screen.getByTestId('tool-card-research-call');
+    expect(within(researchCard).getByRole('link', { name: 'Open research trail' })).toHaveAttribute(
+      'href',
+      '#research-trail',
     );
   });
 });

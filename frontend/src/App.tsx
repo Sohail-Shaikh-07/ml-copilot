@@ -14,6 +14,7 @@ import ArtifactBrowserPanel from './components/ArtifactBrowserPanel';
 import EvalDashboardPanel from './components/EvalDashboardPanel';
 import JobProgressPanel from './components/JobProgressPanel';
 import PublishingPanel from './components/PublishingPanel';
+import ResearchTrailPanel from './components/ResearchTrailPanel';
 import RichMessageContent from './components/RichMessageContent';
 import RuntimeDetailPanel from './components/RuntimeDetailPanel';
 import SessionSidebar from './components/SessionSidebar';
@@ -507,6 +508,8 @@ function App() {
             <RuntimeDetailPanel toolCalls={toolCalls} />
 
             <PublishingPanel toolCalls={toolCalls} />
+
+            <ResearchTrailPanel toolCalls={toolCalls} />
 
             <EvalDashboardPanel toolCalls={toolCalls} />
 

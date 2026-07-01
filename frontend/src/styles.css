@@ -1724,6 +1724,126 @@ button {
   white-space: pre-wrap;
 }
 
+.research-trail-panel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 18px;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.research-trail-counts,
+.research-step-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.research-timeline {
+  display: grid;
+  gap: 12px;
+}
+
+.research-step-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(96, 165, 250, 0.14);
+  border-radius: 16px;
+  background: rgba(3, 7, 18, 0.68);
+}
+
+.research-step-marker {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid rgba(96, 165, 250, 0.28);
+  border-radius: 999px;
+  color: #bfdbfe;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.research-step-body,
+.research-step-details {
+  display: grid;
+  gap: 10px;
+}
+
+.research-step-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.research-step-head h4 {
+  margin: 6px 0;
+  color: var(--text);
+  font-size: 0.95rem;
+  letter-spacing: -0.02em;
+}
+
+.research-step-head code {
+  color: #dbeafe;
+  font-size: 0.72rem;
+}
+
+.research-step-links a {
+  color: var(--accent);
+  font-size: 0.76rem;
+  text-decoration: none;
+}
+
+.research-step-links a:hover {
+  text-decoration: underline;
+}
+
+.research-step-body > p,
+.research-step-details p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.research-step-toggle {
+  width: fit-content;
+}
+
+.research-step-details {
+  padding: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.58);
+}
+
+.research-step-details span,
+.research-step-details blockquote span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.research-step-details blockquote {
+  margin: 0;
+  padding: 10px;
+  border-left: 3px solid rgba(96, 165, 250, 0.45);
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.55);
+  color: #dbeafe;
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
 .artifact-browser-panel {
   display: grid;
   gap: 14px;
