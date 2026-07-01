@@ -941,6 +941,7 @@ def _create_tool_registry(settings: AppSettings) -> ToolRegistry:
         repo_analyzer,
         reporting,
         sandbox,
+        workflow_templates,
         workspace,
     )
 
@@ -1045,6 +1046,15 @@ def _create_tool_registry(settings: AppSettings) -> ToolRegistry:
             description=spec["description"],
             input_schema=spec.get("parameters", {"type": "object", "properties": {}}),
             handler=_make_repo_analyzer_handler(settings),
+        )
+        registry.register(tool_spec)
+
+    for spec in workflow_templates.get_tool_specs():
+        tool_spec = ToolSpec(
+            name=spec["name"],
+            description=spec["description"],
+            input_schema=spec.get("parameters", {"type": "object", "properties": {}}),
+            handler=_make_workflow_template_handler(settings),
         )
         registry.register(tool_spec)
 
@@ -1180,6 +1190,16 @@ def _make_repo_analyzer_handler(settings: AppSettings) -> ToolHandler:
 
     async def _handler(args: dict[str, Any]) -> str:
         return await repo_analyzer.analyze_ml_repo_handler(args, settings)
+
+    return _handler
+
+
+def _make_workflow_template_handler(settings: AppSettings) -> ToolHandler:
+    """Create a handler for autonomous workflow template planning."""
+    from app.tools import workflow_templates
+
+    async def _handler(args: dict[str, Any]) -> str:
+        return await workflow_templates.plan_autonomous_workflow_handler(args, settings)
 
     return _handler
 
