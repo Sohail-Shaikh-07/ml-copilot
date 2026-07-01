@@ -175,7 +175,7 @@ export default function JobProgressPanel({ toolCalls }: JobProgressPanelProps) {
   const activeCount = jobs.filter((job) => ACTIVE_STATUSES.has(job.status)).length;
 
   return (
-    <section className="job-progress-panel" aria-label="Hugging Face job progress">
+    <section className="job-progress-panel" id="job-progress" aria-label="Hugging Face job progress">
       <div className="job-progress-header">
         <div>
           <p className="panel-label">HF Jobs</p>

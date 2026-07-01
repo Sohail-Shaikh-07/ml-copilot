@@ -461,7 +461,7 @@ export default function ToolTracePanel({ liveEvents, pendingApprovals, metrics, 
   const recentEvents = liveEvents.slice(-6);
 
   return (
-    <div className="tool-trace-panel">
+    <div className="tool-trace-panel" id="tool-trace">
       <section className="tool-trace-card">
         <div className="tool-trace-header">
           <div>

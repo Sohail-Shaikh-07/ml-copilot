@@ -36,7 +36,7 @@ export default function UsageMeterPanel({ session, toolCalls }: UsageMeterPanelP
   );
 
   return (
-    <section className="usage-meter-panel" aria-label="Usage and cost estimate">
+    <section className="usage-meter-panel" id="usage-meter" aria-label="Usage and cost estimate">
       <div className="usage-meter-header">
         <div>
           <p className="panel-label">Usage</p>

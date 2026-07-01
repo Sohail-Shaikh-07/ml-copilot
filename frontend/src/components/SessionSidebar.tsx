@@ -140,7 +140,7 @@ export default function SessionSidebar({
             placeholder="Plan a dataset audit"
           />
         </label>
-        <section className="model-control-card" aria-label="Model and provider controls">
+        <section className="model-control-card" id="model-provider-controls" aria-label="Model and provider controls">
           <div>
             <p className="panel-label">Agent controls</p>
             <strong>Model and provider</strong>

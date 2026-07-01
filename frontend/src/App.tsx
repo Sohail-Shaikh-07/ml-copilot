@@ -26,6 +26,7 @@ import {
 } from './sessionControls';
 import ToolTracePanel from './components/ToolTracePanel';
 import UsageMeterPanel from './components/UsageMeterPanel';
+import WorkbenchFlowPanel from './components/WorkbenchFlowPanel';
 import {
   buildRecoverySnapshot,
   deriveConnectionHealth,
@@ -547,6 +548,13 @@ function App() {
               pendingApprovals={pendingApprovals}
               resolving={resolvingApproval}
               onResolve={handleResolveApproval}
+            />
+
+            <WorkbenchFlowPanel
+              messages={messages}
+              recovery={recoverySnapshot}
+              session={activeSession}
+              toolCalls={toolCalls}
             />
 
             <SessionRecoveryPanel
