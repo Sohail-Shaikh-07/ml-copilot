@@ -206,6 +206,15 @@ function addArtifactBrowserLink(items: ToolMetadataItem[]) {
   });
 }
 
+function addPublishingPanelLink(items: ToolMetadataItem[]) {
+  addMetadata(items, {
+    label: 'Publishing',
+    value: 'Final report panel',
+    href: '#publishing-panel',
+    linkLabel: 'Open publishing panel',
+  });
+}
+
 function buildToolProfile(call: ToolCallPayload): ToolProfile {
   const args = call.arguments;
   const output = textOutput(call);
@@ -278,6 +287,7 @@ function buildToolProfile(call: ToolCallPayload): ToolProfile {
       if (outputDir) addMetadata(metadata, { label: 'Output', value: outputDir });
       if (repoId) addMetadata(metadata, { label: 'Repository', value: repoId });
       addRuntimePanelLink(metadata);
+      addPublishingPanelLink(metadata);
       addArtifactBrowserLink(metadata);
 
       return {

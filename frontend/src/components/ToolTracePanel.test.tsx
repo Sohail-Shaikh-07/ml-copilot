@@ -128,8 +128,12 @@ describe('ToolTracePanel', () => {
     );
 
     const publishCard = screen.getByTestId('tool-card-publish-call');
-    expect(within(publishCard).getByText('Publishing')).toBeInTheDocument();
+    expect(within(publishCard).getAllByText('Publishing').length).toBeGreaterThan(0);
     expect(within(publishCard).getByText('.ml-copilot/reports/model-a')).toBeInTheDocument();
+    expect(within(publishCard).getByRole('link', { name: 'Open publishing panel' })).toHaveAttribute(
+      'href',
+      '#publishing-panel',
+    );
     expect(within(publishCard).getByRole('link', { name: 'Open artifact browser' })).toHaveAttribute(
       'href',
       '#artifact-browser',
