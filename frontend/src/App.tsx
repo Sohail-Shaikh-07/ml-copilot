@@ -13,6 +13,7 @@ import ApprovalDialog from './components/ApprovalDialog';
 import ArtifactBrowserPanel from './components/ArtifactBrowserPanel';
 import EvalDashboardPanel from './components/EvalDashboardPanel';
 import JobProgressPanel from './components/JobProgressPanel';
+import PublishingPanel from './components/PublishingPanel';
 import RichMessageContent from './components/RichMessageContent';
 import RuntimeDetailPanel from './components/RuntimeDetailPanel';
 import SessionSidebar from './components/SessionSidebar';
@@ -504,6 +505,8 @@ function App() {
             <UsageMeterPanel session={activeSession} toolCalls={toolCalls} />
 
             <RuntimeDetailPanel toolCalls={toolCalls} />
+
+            <PublishingPanel toolCalls={toolCalls} />
 
             <EvalDashboardPanel toolCalls={toolCalls} />
 
