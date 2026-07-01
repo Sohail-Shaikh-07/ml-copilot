@@ -11,6 +11,7 @@ import {
 } from './api';
 import ApprovalDialog from './components/ApprovalDialog';
 import ArtifactBrowserPanel from './components/ArtifactBrowserPanel';
+import EvalDashboardPanel from './components/EvalDashboardPanel';
 import JobProgressPanel from './components/JobProgressPanel';
 import RichMessageContent from './components/RichMessageContent';
 import RuntimeDetailPanel from './components/RuntimeDetailPanel';
@@ -503,6 +504,8 @@ function App() {
             <UsageMeterPanel session={activeSession} toolCalls={toolCalls} />
 
             <RuntimeDetailPanel toolCalls={toolCalls} />
+
+            <EvalDashboardPanel toolCalls={toolCalls} />
 
             <ArtifactBrowserPanel toolCalls={toolCalls} />
 

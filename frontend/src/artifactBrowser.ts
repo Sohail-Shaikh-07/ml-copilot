@@ -128,7 +128,7 @@ function collectCandidatePaths(call: ToolCallPayload) {
       candidates.push({ path: match[1], sizeBytes: Number(match[2]) });
     }
 
-    for (const match of output.matchAll(/^- (?:README|Final report|Manifest|Report|Model card|Dataset|Artifact):\s*(.+)$/gim)) {
+    for (const match of output.matchAll(/^- (?:README|Final report|Manifest|Report|Markdown report|Suite report|Model card|Dataset|Artifact):\s*(.+)$/gim)) {
       candidates.push({ path: match[1], sizeBytes: null });
     }
 

@@ -50,12 +50,16 @@ describe('buildArtifactBrowserItems', () => {
           '# Model Card',
           'This model was evaluated on a fixture dataset.',
           '```',
+          '- Suite report: .ml-copilot/evals/suites/latest/suite-report.json',
+          '- Markdown report: .ml-copilot/evals/suites/latest/suite-report.md',
         ].join('\n'),
       }),
     ]);
 
     expect(items.map((item) => item.path)).toContain('src/train.py');
     expect(items.map((item) => item.path)).toContain('.ml-copilot/reports/model-a/README.md');
+    expect(items.map((item) => item.path)).toContain('.ml-copilot/evals/suites/latest/suite-report.json');
+    expect(items.map((item) => item.path)).toContain('.ml-copilot/evals/suites/latest/suite-report.md');
     expect(items.map((item) => item.path)).toContain('../secrets.env');
 
     const readme = items.find((item) => item.path.endsWith('README.md'));
