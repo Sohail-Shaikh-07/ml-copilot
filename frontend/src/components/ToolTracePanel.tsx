@@ -215,6 +215,15 @@ function addPublishingPanelLink(items: ToolMetadataItem[]) {
   });
 }
 
+function addResearchTrailLink(items: ToolMetadataItem[]) {
+  addMetadata(items, {
+    label: 'Research',
+    value: 'Evidence trail',
+    href: '#research-trail',
+    linkLabel: 'Open research trail',
+  });
+}
+
 function buildToolProfile(call: ToolCallPayload): ToolProfile {
   const args = call.arguments;
   const output = textOutput(call);
@@ -298,12 +307,17 @@ function buildToolProfile(call: ToolCallPayload): ToolProfile {
         metadata,
       };
     }
+    case 'paper_details':
+    case 'paper_citation_graph':
+    case 'read_paper':
+    case 'extract_training_recipe':
     case 'hf_papers':
       addMetadata(metadata, { label: 'Query', value: getArgText(args, 'query') ?? getArgText(args, 'arxiv_id') ?? '' });
+      addResearchTrailLink(metadata);
       return {
         category: 'Research',
-        title: 'Paper search',
-        description: 'Search, inspect, and connect papers, citations, datasets, and models.',
+        title: call.tool_name === 'extract_training_recipe' ? 'Training recipe' : call.tool_name === 'paper_citation_graph' ? 'Citation graph' : call.tool_name === 'read_paper' ? 'Paper reading' : 'Paper research',
+        description: 'Search, inspect, read, and connect papers, citations, recipes, datasets, and models.',
         icon: '📄',
         metadata,
       };
@@ -311,6 +325,7 @@ function buildToolProfile(call: ToolCallPayload): ToolProfile {
     case 'explore_hf_docs':
     case 'find_hf_api':
       addMetadata(metadata, { label: 'Topic', value: getArgText(args, 'query') ?? getArgText(args, 'url') ?? '' });
+      addResearchTrailLink(metadata);
       return {
         category: 'Documentation',
         title: sentenceCase(call.tool_name),
@@ -325,6 +340,7 @@ function buildToolProfile(call: ToolCallPayload): ToolProfile {
         label: 'Resource',
         value: getArgText(args, 'dataset') ?? getArgText(args, 'repo_id') ?? getArgText(args, 'query') ?? '',
       });
+      addResearchTrailLink(metadata);
       addArtifactBrowserLink(metadata);
       return {
         category: 'Hub operation',
@@ -335,6 +351,7 @@ function buildToolProfile(call: ToolCallPayload): ToolProfile {
       };
     case 'analyze_repository':
       addMetadata(metadata, { label: 'Path', value: getArgText(args, 'path') ?? '' });
+      addResearchTrailLink(metadata);
       addArtifactBrowserLink(metadata);
       return {
         category: 'Repository analysis',
