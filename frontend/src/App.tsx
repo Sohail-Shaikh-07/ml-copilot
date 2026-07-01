@@ -17,6 +17,7 @@ import PublishingPanel from './components/PublishingPanel';
 import ResearchTrailPanel from './components/ResearchTrailPanel';
 import RichMessageContent from './components/RichMessageContent';
 import RuntimeDetailPanel from './components/RuntimeDetailPanel';
+import SessionRecoveryPanel from './components/SessionRecoveryPanel';
 import SessionSidebar from './components/SessionSidebar';
 import {
   DEFAULT_SESSION_CONTROLS,
@@ -25,6 +26,14 @@ import {
 } from './sessionControls';
 import ToolTracePanel from './components/ToolTracePanel';
 import UsageMeterPanel from './components/UsageMeterPanel';
+import {
+  buildRecoverySnapshot,
+  deriveConnectionHealth,
+  mergeSessionSummaries,
+  replaySessionEvents,
+  type LoadState,
+  type StreamState,
+} from './workbenchState';
 import type {
   ApprovalDecisionRequest,
   MessagePayload,
@@ -35,11 +44,7 @@ import type {
   ToolCallPayload,
 } from './types';
 
-type LoadState = 'idle' | 'loading' | 'ready' | 'error';
-type StreamState = 'idle' | 'connecting' | 'streaming' | 'closed' | 'error';
-
 const sessionMetadataSource = 'frontend-shell';
-const terminalEventTypes = new Set(['turn_complete', 'approval_required', 'error', 'interrupted']);
 
 function formatTimestamp(value: string) {
   const date = new Date(value);
@@ -97,6 +102,12 @@ function App() {
   const [messages, setMessages] = useState<MessagePayload[]>([]);
   const [liveEvents, setLiveEvents] = useState<SessionEventPayload[]>([]);
   const [liveAssistantText, setLiveAssistantText] = useState('');
+  const [lastEventSequence, setLastEventSequence] = useState(-1);
+  const [lastEventAt, setLastEventAt] = useState<string | null>(null);
+  const [replayedEventCount, setReplayedEventCount] = useState(0);
+  const [duplicateEventCount, setDuplicateEventCount] = useState(0);
+  const [recoveredAt, setRecoveredAt] = useState<string | null>(null);
+  const [heartbeatNow, setHeartbeatNow] = useState(() => new Date().toISOString());
   const [state, setState] = useState<LoadState>('idle');
   const [sessionState, setSessionState] = useState<LoadState>('idle');
   const [streamState, setStreamState] = useState<StreamState>('idle');
@@ -116,11 +127,21 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const timer = window.setInterval(() => setHeartbeatNow(new Date().toISOString()), 15_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     if (!selectedSessionId) {
       setActiveSession(null);
       setMessages([]);
       setLiveEvents([]);
       setLiveAssistantText('');
+      setLastEventSequence(-1);
+      setLastEventAt(null);
+      setReplayedEventCount(0);
+      setDuplicateEventCount(0);
+      setRecoveredAt(null);
       setStreamState('idle');
       closeEventStream();
       return;
@@ -129,6 +150,11 @@ function App() {
     lastEventSequenceRef.current = -1;
     setLiveEvents([]);
     setLiveAssistantText('');
+    setLastEventSequence(-1);
+    setLastEventAt(null);
+    setReplayedEventCount(0);
+    setDuplicateEventCount(0);
+    setRecoveredAt(null);
     void refreshSession(selectedSessionId);
     connectEventStream(selectedSessionId, { replay: true });
 
@@ -148,23 +174,26 @@ function App() {
     eventSourceRef.current = createSessionEventSource(sessionId, {
       after,
       onEvent: (event) => {
-        lastEventSequenceRef.current = Math.max(lastEventSequenceRef.current, event.sequence);
+        setHeartbeatNow(new Date().toISOString());
+        setLastEventAt(event.created_at);
         setStreamState('streaming');
-        setLiveEvents((current) => [...current.slice(-39), event]);
-
-        if (event.event_type === 'assistant_chunk') {
-          const content = event.data.content;
-          if (typeof content === 'string') {
-            setLiveAssistantText((current) => current + content);
+        setLiveEvents((current) => {
+          const replay = replaySessionEvents({ current, incoming: [event] });
+          lastEventSequenceRef.current = replay.lastSequence;
+          setLastEventSequence(replay.lastSequence);
+          setReplayedEventCount((count) => count + replay.replayedCount);
+          setDuplicateEventCount((count) => count + replay.duplicateCount);
+          if (replay.assistantDelta) {
+            setLiveAssistantText((currentText) => currentText + replay.assistantDelta);
           }
-        }
-
-        if (terminalEventTypes.has(event.event_type)) {
-          closeEventStream();
-          setStreamState('closed');
-          void refreshSession(sessionId);
-          void refreshSessions();
-        }
+          if (replay.terminalEventType) {
+            closeEventStream();
+            setStreamState('closed');
+            void refreshSession(sessionId);
+            void refreshSessions();
+          }
+          return replay.events;
+        });
       },
       onError: () => {
         eventSourceRef.current = null;
@@ -212,6 +241,7 @@ function App() {
       ]);
       setActiveSession(detail);
       setMessages(transcript);
+      setRecoveredAt(new Date().toISOString());
       setSessionState('ready');
     } catch (err) {
       setActiveSession(null);
@@ -232,7 +262,7 @@ function App() {
         model: draftModel.trim() || null,
         metadata: buildSessionMetadata(sessionMetadataSource, draftControls),
       }, draftHfToken.trim() || null);
-      setSessions((current) => [created, ...current.filter((session) => session.id !== created.id)]);
+      setSessions((current) => mergeSessionSummaries(current, created));
       setSelectedSessionId(created.id);
       setDraftTitle('');
       setDraftModel('');
@@ -268,9 +298,7 @@ function App() {
       setActiveSession(response.session);
       setMessages(response.messages);
       setLiveAssistantText('');
-      setSessions((current) =>
-        current.map((session) => (session.id === response.session.id ? response.session : session)),
-      );
+      setSessions((current) => mergeSessionSummaries(current, response.session));
 
       if (response.result.status === 'approval_required') {
         setNotice('The agent is waiting for approval. Review the pending action in the approval dialog.');
@@ -309,9 +337,7 @@ function App() {
       );
       setActiveSession(response.session);
       setMessages(response.messages);
-      setSessions((current) =>
-        current.map((session) => (session.id === response.session.id ? response.session : session)),
-      );
+      setSessions((current) => mergeSessionSummaries(current, response.session));
 
       if (response.result.status === 'approval_required') {
         setNotice('One approval was resolved. Another pending approval still needs review.');
@@ -347,6 +373,28 @@ function App() {
 
   const pendingApprovals: PendingApprovalPayload[] = activeSession?.pending_approvals ?? [];
   const toolCalls: ToolCallPayload[] = activeSession?.tool_calls ?? [];
+  const recoverySnapshot = useMemo(() => buildRecoverySnapshot({
+    session: activeSession,
+    messages,
+    liveEvents,
+    lastEventSequence,
+    replayedEventCount,
+    duplicateEventCount,
+    recoveredAt,
+  }), [activeSession, messages, liveEvents, lastEventSequence, replayedEventCount, duplicateEventCount, recoveredAt]);
+  const connectionHealth = useMemo(() => deriveConnectionHealth({
+    loadState: state,
+    sessionState,
+    streamState,
+    lastEventAt,
+    now: heartbeatNow,
+    hasReplayCursor: lastEventSequence >= 0,
+  }), [state, sessionState, streamState, lastEventAt, heartbeatNow, lastEventSequence]);
+
+  function handleReconnectStream() {
+    if (!selectedSessionId) return;
+    connectEventStream(selectedSessionId, { replay: true });
+  }
 
   return (
     <div className="app-shell">
@@ -459,8 +507,8 @@ function App() {
                   />
                 </label>
                 <div className="composer-actions">
-                  <span className={`status-chip ${streamState === 'error' ? 'danger' : streamState === 'streaming' ? 'success' : 'neutral'}`}>
-                    stream: {streamState}
+                  <span className={`status-chip ${connectionHealth.tone}`}>
+                    stream: {connectionHealth.phase}
                   </span>
                   <button className="primary-button" type="submit" disabled={sending || !draftPrompt.trim()}>
                     {sending ? 'Sending...' : 'Send prompt'}
@@ -499,6 +547,12 @@ function App() {
               pendingApprovals={pendingApprovals}
               resolving={resolvingApproval}
               onResolve={handleResolveApproval}
+            />
+
+            <SessionRecoveryPanel
+              health={connectionHealth}
+              snapshot={recoverySnapshot}
+              onReconnect={handleReconnectStream}
             />
 
             <JobProgressPanel toolCalls={toolCalls} />
